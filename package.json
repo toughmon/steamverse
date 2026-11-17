@@ -1,0 +1,18 @@
+{
+  "name": "steamverse",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n web,api -c cyan,magenta \"npm run dev -w @steamverse/web\" \"npm run dev -w @steamverse/server\"",
+    "build": "npm run build -w @steamverse/web",
+    "typecheck": "npm run typecheck -w @steamverse/web && npm run typecheck -w @steamverse/server",
+    "dev:web": "npm run dev -w @steamverse/web",
+    "dev:api": "npm run dev -w @steamverse/server"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7"
+  }
+}

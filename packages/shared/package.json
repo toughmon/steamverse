@@ -1,0 +1,18 @@
+{
+  "name": "@steamverse/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2"
+  },
+  "devDependencies": {
+    "graphology-types": "^0.24.8"
+  }
+}
