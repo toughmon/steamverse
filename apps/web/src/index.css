@@ -116,96 +116,18 @@ body {
   animation: sv-fade-up 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
-/* ── 3D 우주 뷰 라벨 (CSS2DRenderer) ───────────────────── */
+/* ── 탐사 뷰 (도트) ───────────────────────────────────── */
 
-.sv-galaxy-label {
-  position: relative;
-  pointer-events: none;
-  text-align: center;
-  white-space: nowrap;
-  padding: 14px 26px;
-  transition: opacity 0.35s ease;
+.font-pixel {
+  font-family: 'Silkscreen', 'Pretendard Variable', sans-serif;
+  -webkit-font-smoothing: none;
 }
-/* 밝은 은하 중심 위에서도 글자가 읽히도록 은은한 어둠을 깐다 */
-.sv-galaxy-label::before {
-  content: '';
-  position: absolute;
-  inset: -6px -10px;
-  z-index: -1;
-  border-radius: 999px;
-  background: radial-gradient(closest-side, rgba(4, 5, 12, 0.62), rgba(4, 5, 12, 0.28) 60%, transparent);
+@keyframes sv-voyage-banner {
+  0% { opacity: 0; transform: translate(-50%, 6px); }
+  12% { opacity: 1; transform: translate(-50%, 0); }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
 }
-.sv-galaxy-label.is-inside {
-  opacity: 0;
-}
-.sv-galaxy-label .name {
-  font: 650 19px/1.1 var(--font-sans);
-  letter-spacing: -0.01em;
-  color: #f4f6fb;
-  text-shadow:
-    0 0 18px color-mix(in srgb, var(--g, #fff) 55%, transparent),
-    0 1px 10px rgba(0, 0, 0, 0.9);
-}
-.sv-galaxy-label .sub {
-  margin-top: 3px;
-  font: 500 11.5px/1.2 var(--font-sans);
-  color: currentColor;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.95);
-}
-.sv-galaxy-label .sub:empty {
-  display: none;
-}
-.sv-galaxy-label .meta {
-  margin-top: 6px;
-  font: 500 9px/1.3 var(--font-mono);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(226, 232, 240, 0.5);
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.95);
-}
-/* 전체 우주에서는 상위 게임 이름을 숨겨 은하 이름과 겹치지 않게 (호버·선택한 별은 그대로) */
-.sv-overview .sv-star-label.is-dim {
-  opacity: 0;
-}
-
-.sv-star-label {
-  pointer-events: none;
-  padding-left: 14px;
-  white-space: nowrap;
-  opacity: 0;
-  transform: translateX(-4px);
-  transition:
-    opacity 0.25s ease,
-    transform 0.25s ease;
-}
-.sv-star-label .n {
-  font: 600 11.5px/1.2 var(--font-sans);
-  color: #f4f6fb;
-  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.95);
-}
-.sv-star-label .m {
-  margin-top: 2px;
-  font: 500 9px/1.2 var(--font-mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(226, 232, 240, 0.5);
-}
-.sv-star-label.is-dim {
-  opacity: 0.55;
-  transform: none;
-}
-.sv-star-label.is-cam {
-  opacity: 0.78;
-  transform: none;
-}
-.sv-star-label.is-near {
-  opacity: 0.85;
-  transform: none;
-}
-.sv-star-label.is-active {
-  opacity: 1;
-  transform: none;
-}
-.sv-star-label.is-active .n {
-  font-size: 13px;
+.voyage-banner {
+  animation: sv-voyage-banner 3.2s steps(16, end) both;
 }

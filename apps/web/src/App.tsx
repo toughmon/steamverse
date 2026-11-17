@@ -5,15 +5,15 @@ import { ExplorerView } from './views/ExplorerView';
 import { OntologyView } from './views/OntologyView';
 import { formatNumber, percent } from './lib/format';
 
-// three.js가 커서 3D 뷰는 탭을 열 때 불러온다
-const UniverseView = lazy(() => import('./views/UniverseView').then((m) => ({ default: m.UniverseView })));
+// 탐사·차트 뷰는 탭을 열 때 불러온다
+const VoyageView = lazy(() => import('./views/VoyageView').then((m) => ({ default: m.VoyageView })));
 const ChartView = lazy(() => import('./views/ChartView').then((m) => ({ default: m.ChartView })));
 
-type View = 'explorer' | 'universe' | 'charts' | 'ontology';
+type View = 'explorer' | 'voyage' | 'charts' | 'ontology';
 
 const TABS: { id: View; index: string; label: string }[] = [
   { id: 'explorer', index: '01', label: '그래프 탐색기' },
-  { id: 'universe', index: '02', label: '우주 뷰' },
+  { id: 'voyage', index: '02', label: '탐사' },
   { id: 'charts', index: '03', label: '차트' },
   { id: 'ontology', index: '04', label: '온톨로지' },
 ];
@@ -192,25 +192,6 @@ export default function App() {
 
       <main className="relative min-h-0 flex-1">
         {view === 'explorer' && <ExplorerView graph={graph} selectedId={selectedId} onSelect={setSelectedId} />}
-        {view === 'universe' && (
-          <Suspense
-            fallback={
-              <div className="grid h-full place-items-center bg-[#020309]">
-                <span className="eyebrow animate-pulse">Loading universe</span>
-              </div>
-            }
-          >
-            <UniverseView
-              graph={graph}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onOpenInExplorer={(id) => {
-                setSelectedId(id);
-                setView('explorer');
-              }}
-            />
-          </Suspense>
-        )}
         {view === 'charts' && (
           <Suspense fallback={<div className="h-full bg-[#04050a]" />}>
             <ChartView
@@ -223,6 +204,17 @@ export default function App() {
           </Suspense>
         )}
         {view === 'ontology' && <OntologyView graph={graph} />}
+        {view === 'voyage' && (
+          <Suspense fallback={<div className="h-full bg-[#04050b]" />}>
+            <VoyageView
+              graph={graph}
+              onOpenInExplorer={(id) => {
+                setSelectedId(id);
+                setView('explorer');
+              }}
+            />
+          </Suspense>
+        )}
       </main>
     </div>
   );
