@@ -659,7 +659,7 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
 
       {/* 하단 중앙: 도킹 안내 */}
       {near && !dockedId && (
-        <div className="pointer-events-none absolute bottom-16 left-1/2 z-10 -translate-x-1/2">
+        <div className="pointer-events-none absolute bottom-[76px] left-1/2 z-10 -translate-x-1/2">
           <div className="flex items-center gap-2.5 border-2 border-[#ffd479]/60 bg-[#070912]/95 px-3 py-2 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]">
             <span className="font-pixel animate-pulse border border-[#ffd479] px-1.5 py-0.5 text-[10px] text-[#ffd479]">E</span>
             <span className="text-[12.5px] text-white">
@@ -737,8 +737,8 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
         </div>
       )}
 
-      {/* 상단 가운데: 조작 안내 (미니맵·도킹 패널과 겹치지 않는 자리) */}
-      <div className="pointer-events-none absolute left-1/2 top-4 z-10 flex -translate-x-1/2 items-center gap-4 whitespace-nowrap border-2 border-white/10 bg-[#070912]/85 px-4 py-2 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]">
+      {/* 하단 가운데: 조작 안내 */}
+      <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-4 whitespace-nowrap border-2 border-white/10 bg-[#070912]/85 px-4 py-2 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]">
         {CONTROLS.map(([key, label]) => (
           <span key={key} className="flex items-center gap-1.5">
             <kbd className="font-pixel border border-white/30 border-b-2 bg-white/[0.07] px-1.5 py-[3px] text-[11px] leading-none text-white/90">{key}</kbd>
