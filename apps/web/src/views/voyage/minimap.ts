@@ -71,6 +71,8 @@ export function drawMinimap(
     view: { w: number; h: number; cx: number; cy: number };
     target?: { x: number; y: number };
     highlight?: { x: number; y: number };
+    quest?: { x: number; y: number };
+    friends?: { x: number; y: number; color: string }[];
     now: number;
   },
 ) {
@@ -112,6 +114,23 @@ export function drawMinimap(
     ctx.fillRect(tx + 2, ty, 1, 1);
     ctx.fillRect(tx, ty - 2, 1, 1);
     ctx.fillRect(tx, ty + 2, 1, 1);
+  }
+  // 친구 탐사선
+  for (const f of state.friends ?? []) {
+    const m = map.toMap(f.x, f.y);
+    ctx.fillStyle = f.color;
+    ctx.fillRect(Math.round(m.x), Math.round(m.y), 1, 1);
+  }
+  // 퀘스트 비콘: 깜빡이는 노란 느낌표
+  if (state.quest && Math.floor(state.now / 400) % 2 === 0) {
+    const q = map.toMap(state.quest.x, state.quest.y);
+    const qx = Math.round(q.x);
+    const qy = Math.round(q.y);
+    ctx.fillStyle = '#2a1d05';
+    ctx.fillRect(qx - 2, qy - 6, 5, 9);
+    ctx.fillStyle = '#ffd479';
+    ctx.fillRect(qx - 1, qy - 5, 3, 4);
+    ctx.fillRect(qx - 1, qy, 3, 2);
   }
   // 마우스로 가리킨 행성
   if (state.highlight) {

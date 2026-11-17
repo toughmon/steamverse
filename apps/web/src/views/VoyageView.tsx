@@ -3,7 +3,9 @@ import { steamImage, type OntologyGraph } from '@steamverse/shared';
 import { NodeDetail } from '../components/NodeDetail';
 import { formatHours } from '../lib/format';
 import { SHIP_SIZE, bayer, dissolveFog, fogSprite, nebulaSprite, planetSprite, shipSprite, type FogSprite } from './voyage/sprites';
+import { buildFriendShips, stepFriends } from './voyage/friends';
 import { MH, MW, buildMinimap, drawMinimap } from './voyage/minimap';
+import { questCandidates, type Quest } from './voyage/quests';
 import { buildWorld, type Planet, type World } from './voyage/world';
 
 /**
@@ -21,6 +23,9 @@ const DOCK_GAP = 26;
 const VISIT_GAP = 46;
 const REVEAL_MS = 900;
 const TOAST_MS = 3800;
+/** 친구 탐사선에 이만큼 다가가면 인사 알림 */
+const GREET_RANGE = 40;
+const QUEST_COLOR = '#ffd479';
 const LABEL_RANGE = 190;
 const WARP_MS = 900;
 /** 미니맵을 화면에 키우는 배율 */
@@ -155,7 +160,30 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
     const t = window.setTimeout(() => setToast(null), TOAST_MS);
     return () => window.clearTimeout(t);
   }, [toast]);
+  // ── 퀘스트 ──
+  const questKey = `steamverse.voyage.quests.${playerId}`;
+  const [questsDone, setQuestsDone] = useState<Set<string>>(() => loadVisited(questKey));
+  const [questSkip, setQuestSkip] = useState(0);
+  useEffect(() => {
+    setQuestsDone(loadVisited(questKey));
+    setQuestSkip(0);
+  }, [questKey]);
+  const candidates = useMemo(() => questCandidates(graph, world), [graph, world]);
+  const openQuests = candidates.filter((q) => !questsDone.has(q.planet.id));
+  const quest = openQuests.length ? openQuests[questSkip % openQuests.length]! : null;
+  const questRef = useRef<string | null>(null);
+  questRef.current = quest?.planet.id ?? null;
+
+  // ── 친구 탐사선 ──
+  const friendShips = useMemo(() => buildFriendShips(graph, world), [graph, world]);
+  const friendsRef = useRef(friendShips);
+  friendsRef.current = friendShips;
+  const greeted = useRef(new Set<string>());
+
   const resetExploration = () => {
+    setQuestsDone(new Set());
+    saveVisited(questKey, new Set());
+    setQuestSkip(0);
     visitedRef.current = new Set();
     revealAt.current.clear();
     saveVisited(storageKey, visitedRef.current);
@@ -414,6 +442,21 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
       cam.x += (s.x - cam.x) * follow;
       cam.y += (s.y - cam.y) * follow;
 
+      // ── 친구 탐사선 ──
+      const fships = friendsRef.current;
+      stepFriends(fships, dt, now);
+      for (const f of fships) {
+        if (greeted.current.has(f.id) || Math.hypot(f.x - s.x, f.y - s.y) > GREET_RANGE) continue;
+        greeted.current.add(f.id);
+        setToast({
+          key: now + 2,
+          title: 'FRIEND NEARBY',
+          name: f.name,
+          sub: `${f.mode === 'travel' ? `${f.planet.node.label}(으)로 가는 중` : `${f.planet.node.label} 탐사 중`}${f.shared ? ` · 같이 가진 게임 ${f.shared}개` : ''}`,
+          color: f.color,
+        });
+      }
+
       // ── 탐사: 처음 가까이 간 행성을 기록. 안개 행성이면 안개가 걷힌다 ──
       let newlyVisited = false;
       for (const p of wld.planets) {
@@ -591,6 +634,77 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
         }
       }
 
+      // 퀘스트 비콘: 행성에서 위로 솟는 빛기둥 + 느낌표. 화면 밖이면 가장자리 화살표
+      let questArrow: { x: number; y: number; dist: number } | null = null;
+      const qp = questRef.current ? wld.planetById.get(questRef.current) : undefined;
+      if (qp) {
+        const qx = Math.round(qp.x + ox);
+        const qy = Math.round(qp.y + oy);
+        const onScreen = qx > -qp.r && qx < W + qp.r && qy > -qp.r - 60 && qy < H + qp.r;
+        if (onScreen) {
+          const top = qy - qp.r - 4;
+          const beamH = 44;
+          const drift = Math.floor(now / 70);
+          bctx.fillStyle = QUEST_COLOR;
+          for (let i = 0; i < beamH; i++) {
+            const yy = top - i;
+            const fade = 1 - i / beamH;
+            for (let dx = -1; dx <= 1; dx++) {
+              if (bayer(qx + dx, yy + drift) < fade * (dx === 0 ? 0.9 : 0.4)) bctx.fillRect(qx + dx, yy, 1, 1);
+            }
+          }
+          const gy = top - beamH - 10 + Math.round(Math.sin(now / 300) * 1.5);
+          bctx.fillStyle = '#2a1d05';
+          bctx.fillRect(qx - 3, gy - 1, 7, 11);
+          bctx.fillStyle = QUEST_COLOR;
+          bctx.fillRect(qx - 2, gy, 5, 1);
+          bctx.fillRect(qx - 2, gy + 8, 5, 1);
+          bctx.fillRect(qx - 1, gy + 1, 3, 4);
+          bctx.fillRect(qx - 1, gy + 6, 3, 2);
+        } else {
+          const cx = W / 2;
+          const cy = H / 2;
+          const dx = qx - cx;
+          const dy = qy - cy;
+          // 아래쪽은 조작 안내 막대를 피해 더 안쪽에
+          const halfH = dy > 0 ? H / 2 - 34 : H / 2 - 14;
+          const t = Math.min((W / 2 - 14) / Math.abs(dx || 1e-6), halfH / Math.abs(dy || 1e-6));
+          const ax = Math.round(cx + dx * t);
+          const ay = Math.round(cy + dy * t);
+          const len = Math.hypot(dx, dy);
+          const ux = dx / len;
+          const uy = dy / len;
+          if (Math.floor(now / 350) % 3 !== 0) {
+            bctx.fillStyle = QUEST_COLOR;
+            for (let i = 0; i < 5; i++) {
+              for (const side of [-1, 1]) {
+                bctx.fillRect(Math.round(ax - ux * i + -uy * i * side), Math.round(ay - uy * i + ux * i * side), 1, 1);
+                bctx.fillRect(Math.round(ax - ux * (i + 1) + -uy * i * side), Math.round(ay - uy * (i + 1) + ux * i * side), 1, 1);
+              }
+            }
+          }
+          questArrow = { x: ax - ux * 10, y: ay - uy * 10, dist: Math.hypot(qp.x - s.x, qp.y - s.y) };
+        }
+      }
+
+      // 친구 탐사선
+      for (const f of fships) {
+        const fx = Math.round(f.x + ox);
+        const fy = Math.round(f.y + oy);
+        if (fx < -10 || fx > W + 10 || fy < -10 || fy > H + 10) continue;
+        if (f.mode === 'travel' && frame % 4 < 2) {
+          const back = f.angle + Math.PI / 2;
+          bctx.fillStyle = f.color;
+          bctx.fillRect(Math.round(fx + Math.cos(back) * 6), Math.round(fy + Math.sin(back) * 6), 1, 1);
+        }
+        const snapF = Math.round(f.angle / (Math.PI / 8)) * (Math.PI / 8);
+        bctx.save();
+        bctx.translate(fx, fy);
+        bctx.rotate(snapF);
+        bctx.drawImage(f.sprite, -Math.floor(SHIP_SIZE / 2), -Math.floor(SHIP_SIZE / 2));
+        bctx.restore();
+      }
+
       // 불꽃
       for (const p of particles) {
         bctx.fillStyle = p.life > 0.6 ? '#ffe08a' : p.life > 0.3 ? '#ff9e7a' : '#b24a5a';
@@ -659,6 +773,30 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
       }
       ctx.globalAlpha = 1;
 
+      for (const f of fships) {
+        const d = Math.hypot(f.x - s.x, f.y - s.y);
+        if (d > LABEL_RANGE) continue;
+        const sx = (f.x + ox) * PX;
+        const sy = (f.y + oy + 8) * PX;
+        if (sx < -100 || sx > cssW + 100 || sy < -40 || sy > cssH + 40) continue;
+        ctx.globalAlpha = Math.max(0, Math.min(1, (LABEL_RANGE - d) / 50));
+        ctx.font = `10px ${PIXEL_FONT}`;
+        const w = Math.ceil(ctx.measureText(f.name).width) + 10;
+        ctx.fillStyle = 'rgba(4,5,11,0.78)';
+        ctx.fillRect(Math.round(sx - w / 2), Math.round(sy), w, 15);
+        ctx.fillStyle = f.color;
+        ctx.fillText(f.name, Math.round(sx), Math.round(sy + 3));
+      }
+      ctx.globalAlpha = 1;
+
+      if (questArrow) {
+        ctx.font = `10px ${PIXEL_FONT}`;
+        ctx.fillStyle = QUEST_COLOR;
+        const tx = Math.min(cssW - 50, Math.max(50, questArrow.x * PX));
+        const ty = Math.min(cssH - 30, Math.max(14, questArrow.y * PX - 6));
+        ctx.fillText(`QUEST ${Math.round(questArrow.dist).toLocaleString()}`, Math.round(tx), Math.round(ty));
+      }
+
       // ── 미니맵 ──
       const mm = minimapRef.current;
       if (mm && frame % 2 === 0) {
@@ -670,6 +808,8 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
           view: { w: W, h: H, cx: cam.x, cy: cam.y },
           target: apPlanet ? { x: apPlanet.x, y: apPlanet.y } : ap2 ? { x: ap2.x, y: ap2.y } : undefined,
           highlight: mapHoverRef.current ?? undefined,
+          quest: qp ? { x: qp.x, y: qp.y } : undefined,
+          friends: fships,
           now,
         });
       }
@@ -686,6 +826,23 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
       canvas.removeEventListener('mouseleave', onLeave);
     };
   }, [ship, nebulae, minimap, storageKey]);
+
+  // 퀘스트 행성에 도킹하면 완료
+  useEffect(() => {
+    if (!quest || dockedId !== quest.planet.id) return;
+    const next = new Set(questsDone);
+    next.add(quest.planet.id);
+    setQuestsDone(next);
+    saveVisited(questKey, next);
+    setToast({
+      key: performance.now(),
+      title: 'QUEST COMPLETE',
+      name: quest.planet.node.label,
+      sub: next.size >= candidates.length ? '모든 퀘스트를 끝냈어요' : `퀘스트 ${next.size}개 완료 · 다음 비콘이 켜졌어요`,
+      color: QUEST_COLOR,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dockedId, quest?.planet.id]);
 
   const near = nearId ? world.planetById.get(nearId) : undefined;
   const sector = sectorId !== null ? world.sectors.find((s) => s.id === sectorId) : undefined;
@@ -712,8 +869,9 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
         </div>
       )}
 
-      {/* 좌상단: 항로 지도(워프) */}
-      <div className="absolute left-4 top-4 z-10 w-[230px] border-2 border-white/10 bg-[#070912]/90 p-3 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]">
+      {/* 좌상단: 항로 지도(워프) + 퀘스트 */}
+      <div className="absolute left-4 top-4 z-10 flex w-[230px] flex-col gap-3">
+      <div className="border-2 border-white/10 bg-[#070912]/90 p-3 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]">
         <div className="font-pixel text-[9px] tracking-[0.25em] text-white/40">WARP MAP</div>
         <div className="mt-1 text-[13px] font-semibold text-white">취향 섹터</div>
         <ul className="mt-2.5 space-y-0.5">
@@ -751,6 +909,44 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
         >
           탐사 기록 초기화
         </button>
+      </div>
+      <QuestCard
+        quest={quest}
+        done={questsDone.size}
+        total={candidates.length}
+        distance={quest ? Math.round(Math.hypot(quest.planet.x - shipRef.current.x, quest.planet.y - shipRef.current.y)) : 0}
+        revealed={quest ? !quest.planet.backlog || visitedRef.current.has(quest.planet.id) : true}
+        onFollow={() => {
+          if (!quest) return;
+          setDockedId(null);
+          autopilot.current = { x: quest.planet.x, y: quest.planet.y, planetId: quest.planet.id };
+        }}
+        onSkip={() => setQuestSkip((v) => v + 1)}
+      />
+      {friendShips.length > 0 && (
+        <div className="border-2 border-white/10 bg-[#070912]/90 p-3 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]">
+          <div className="font-pixel text-[9px] tracking-[0.25em] text-white/40">FRIENDS</div>
+          <ul className="mt-2 space-y-1">
+            {friendShips.map((f) => (
+              <li key={f.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDockedId(null);
+                    autopilot.current = { x: f.planet.x, y: f.planet.y, planetId: f.planet.id };
+                  }}
+                  className="flex w-full items-center gap-2 px-1 py-0.5 text-left transition hover:bg-white/[0.05]"
+                  title={`${f.name}에게 가기 · 같이 가진 게임 ${f.shared}개`}
+                >
+                  <span className="h-2 w-2 shrink-0" style={{ background: f.color }} />
+                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-white/75">{f.name}</span>
+                  <span className="font-pixel text-[9px] text-white/35">{f.shared}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       </div>
 
       {/* 우상단: 탐사율 + 계기판 */}
@@ -931,6 +1127,67 @@ function ExplorationPanel({
         X <span className="text-white/75">{hud.x}</span> · Y <span className="text-white/75">{hud.y}</span> · SPD{' '}
         <span className="text-white/75">{hud.speed}</span>
       </div>
+    </div>
+  );
+}
+
+function QuestCard({
+  quest,
+  done,
+  total,
+  distance,
+  revealed,
+  onFollow,
+  onSkip,
+}: {
+  quest: Quest | null;
+  done: number;
+  total: number;
+  distance: number;
+  revealed: boolean;
+  onFollow: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <div className="border-2 bg-[#070912]/92 p-3 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]" style={{ borderColor: quest ? 'rgba(255,212,121,0.45)' : 'rgba(255,255,255,0.1)' }}>
+      <div className="flex items-center justify-between">
+        <span className="font-pixel text-[9px] tracking-[0.25em]" style={{ color: QUEST_COLOR }}>
+          ! QUEST
+        </span>
+        <span className="font-pixel text-[9px] text-white/40">
+          {done}/{total}
+        </span>
+      </div>
+      {quest ? (
+        <>
+          <div className="mt-1.5 text-[11px] text-white/50">{quest.kind === 'backlog' ? '백로그 행성을 탐사하세요' : '다시 가 볼 만한 행성'}</div>
+          <div className="mt-0.5 truncate text-[14px] font-semibold text-white" title={quest.planet.node.label}>
+            {revealed ? quest.planet.node.label : '??? (안개 속 행성)'}
+          </div>
+          <ul className="mt-1.5 space-y-0.5">
+            {quest.reasons.map((r) => (
+              <li key={r} className="truncate text-[11.5px] text-white/60" title={r}>
+                · {r}
+              </li>
+            ))}
+          </ul>
+          <div className="font-pixel mt-2 text-[9px] tracking-[0.12em] text-white/40">DIST {distance.toLocaleString()}</div>
+          <div className="mt-2 flex gap-1.5">
+            <button
+              type="button"
+              onClick={onFollow}
+              className="flex-1 border border-[#ffd479]/50 bg-[#ffd479]/10 py-1 text-[11.5px] text-[#ffd479] transition hover:bg-[#ffd479]/20"
+            >
+              따라가기
+            </button>
+            <button type="button" onClick={onSkip} className="flex-1 border border-white/15 py-1 text-[11.5px] text-white/60 transition hover:text-white">
+              다른 퀘스트
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="mt-1.5 text-[12px] text-white/55">{total ? '모든 퀘스트를 끝냈어요' : '추천할 백로그 게임이 없어요'}</div>
+      )}
     </div>
   );
 }

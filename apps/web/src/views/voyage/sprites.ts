@@ -47,12 +47,14 @@ const SHIP_COLORS: Record<string, string> = {
 
 export const SHIP_SIZE = SHIP.length;
 
-export function shipSprite(): HTMLCanvasElement {
+/** colors로 일부 색을 바꿔 칠할 수 있다 (친구 탐사선) */
+export function shipSprite(colors: Partial<Record<string, string>> = {}): HTMLCanvasElement {
   const c = makeCanvas(SHIP_SIZE, SHIP_SIZE);
   const ctx = c.getContext('2d')!;
+  const palette = { ...SHIP_COLORS, ...colors };
   SHIP.forEach((row, y) =>
     [...row].forEach((ch, x) => {
-      const col = SHIP_COLORS[ch];
+      const col = palette[ch];
       if (!col) return;
       ctx.fillStyle = col;
       ctx.fillRect(x, y, 1, 1);
