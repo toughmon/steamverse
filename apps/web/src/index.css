@@ -131,3 +131,13 @@ body {
 .voyage-banner {
   animation: sv-voyage-banner 3.2s steps(16, end) both;
 }
+
+@keyframes sv-voyage-toast {
+  0% { opacity: 0; transform: translate(-50%, 8px) scale(0.96); }
+  10% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  80% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, 0) scale(1); }
+}
+.voyage-toast {
+  animation: sv-voyage-toast 3.8s steps(20, end) both;
+}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { steamImage, type OntologyGraph } from '@steamverse/shared';
 import { NodeDetail } from '../components/NodeDetail';
 import { formatHours } from '../lib/format';
-import { SHIP_SIZE, bayer, nebulaSprite, planetSprite, shipSprite } from './voyage/sprites';
+import { SHIP_SIZE, bayer, dissolveFog, fogSprite, nebulaSprite, planetSprite, shipSprite, type FogSprite } from './voyage/sprites';
 import { MH, MW, buildMinimap, drawMinimap } from './voyage/minimap';
 import { buildWorld, type Planet, type World } from './voyage/world';
 
@@ -17,6 +17,10 @@ const ACCEL = 520;
 const MAX_SPEED = 150;
 const BOOST = 1.9;
 const DOCK_GAP = 26;
+/** 행성 표면에서 이만큼 가까이 가면 '탐사함'으로 친다 (도킹 거리보다 넓다) */
+const VISIT_GAP = 46;
+const REVEAL_MS = 900;
+const TOAST_MS = 3800;
 const LABEL_RANGE = 190;
 const WARP_MS = 900;
 /** 미니맵을 화면에 키우는 배율 */
@@ -35,6 +39,8 @@ const PIXEL_FONT = '"Silkscreen", "Pretendard Variable", sans-serif';
 
 interface Props {
   graph: OntologyGraph;
+  /** 탐사 기록을 계정별로 따로 저장하기 위한 키 */
+  playerId: string;
   onOpenInExplorer: (id: string) => void;
 }
 
@@ -81,7 +87,26 @@ function planetAt(world: World, wx: number, wy: number): Planet | undefined {
   return best;
 }
 
-export function VoyageView({ graph, onOpenInExplorer }: Props) {
+function loadVisited(key: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(key);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveVisited(key: string, visited: Set<string>) {
+  try {
+    localStorage.setItem(key, JSON.stringify([...visited]));
+  } catch {
+    /* 저장 못 해도 이번 접속 동안은 유지된다 */
+  }
+}
+
+type Toast = { key: number; title: string; name: string; sub: string; color: string };
+
+export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
   const world = useMemo(() => buildWorld(graph), [graph]);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -112,6 +137,30 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
   const ship = useMemo(() => shipSprite(), []);
   const nebulae = useMemo(() => new Map(world.sectors.map((s) => [s.id, nebulaSprite(s.r * 1.35, s.color, 17 + s.id * 31)])), [world]);
   const planetSprites = useRef(new Map<string, HTMLCanvasElement>());
+  const fogSprites = useRef(new Map<string, FogSprite>());
+
+  // ── 탐사 기록 (계정별로 브라우저에 저장) ──
+  const storageKey = `steamverse.voyage.visited.${playerId}`;
+  const visitedRef = useRef<Set<string>>(loadVisited(storageKey));
+  const [visitedVersion, setVisitedVersion] = useState(0);
+  const revealAt = useRef(new Map<string, number>());
+  const [toast, setToast] = useState<Toast | null>(null);
+  useEffect(() => {
+    visitedRef.current = loadVisited(storageKey);
+    revealAt.current.clear();
+    setVisitedVersion((v) => v + 1);
+  }, [storageKey]);
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), TOAST_MS);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+  const resetExploration = () => {
+    visitedRef.current = new Set();
+    revealAt.current.clear();
+    saveVisited(storageKey, visitedRef.current);
+    setVisitedVersion((v) => v + 1);
+  };
   const minimap = useMemo(() => buildMinimap(world), [world]);
 
   useEffect(() => {
@@ -119,7 +168,9 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
     const sprites = planetSprites.current;
     sprites.clear();
     let alive = true;
+    fogSprites.current.clear();
     for (const p of world.planets) {
+      if (p.backlog) fogSprites.current.set(p.id, fogSprite(p.r, p.seed));
       sprites.set(p.id, planetSprite(p.r, p.color, p.seed));
       const img = new Image();
       img.crossOrigin = 'anonymous';
@@ -363,6 +414,27 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
       cam.x += (s.x - cam.x) * follow;
       cam.y += (s.y - cam.y) * follow;
 
+      // ── 탐사: 처음 가까이 간 행성을 기록. 안개 행성이면 안개가 걷힌다 ──
+      let newlyVisited = false;
+      for (const p of wld.planets) {
+        if (visitedRef.current.has(p.id)) continue;
+        if (Math.hypot(p.x - s.x, p.y - s.y) - p.r >= VISIT_GAP) continue;
+        visitedRef.current.add(p.id);
+        newlyVisited = true;
+        if (p.backlog) {
+          revealAt.current.set(p.id, now);
+          setToast({ key: now, title: 'UNCHARTED PLANET FOUND', name: p.node.label, sub: '아직 한 번도 플레이하지 않은 게임이에요', color: p.color });
+        }
+      }
+      if (newlyVisited) {
+        saveVisited(storageKey, visitedRef.current);
+        setVisitedVersion((v) => v + 1);
+        const total = wld.planets.length;
+        if (total > 0 && wld.planets.every((p) => visitedRef.current.has(p.id))) {
+          setToast({ key: now + 1, title: 'ALL PLANETS CHARTED', name: '모든 행성을 탐사했어요', sub: `${total}개 행성 · 탐사율 100%`, color: '#7dffb2' });
+        }
+      }
+
       // ── 근처 행성·섹터 판정 ──
       let near: Planet | undefined;
       let nearD = Infinity;
@@ -460,10 +532,27 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
         const x = p.x + ox;
         const y = p.y + oy;
         if (x + p.r * 2 < 0 || x - p.r * 2 > W || y + p.r * 2 < 0 || y - p.r * 2 > H) continue;
+        // 안개 행성: 탐사 전에는 구름과 물음표만
+        const fog = fogSprites.current.get(p.id);
+        if (fog && !visitedRef.current.has(p.id)) {
+          const bob = Math.round(Math.sin(now / 700 + p.seed));
+          bctx.drawImage(fog.canvas, Math.round(x - fog.canvas.width / 2), Math.round(y - fog.canvas.height / 2) + bob);
+          continue;
+        }
         if (p.favorite) ringPoints(p, false);
         const spr = planetSprites.current.get(p.id);
         if (spr) bctx.drawImage(spr, Math.round(x - spr.width / 2), Math.round(y - spr.height / 2));
         if (p.favorite) ringPoints(p, true);
+        // 막 탐사한 안개 행성: 안개가 도트 단위로 흩어진다
+        const revealStart = revealAt.current.get(p.id);
+        if (fog && revealStart !== undefined) {
+          const t = (now - revealStart) / REVEAL_MS;
+          if (t >= 1) revealAt.current.delete(p.id);
+          else {
+            const d = dissolveFog(fog, t);
+            bctx.drawImage(d, Math.round(x - d.width / 2), Math.round(y - d.height / 2));
+          }
+        }
         // 최근 2주에 한 게임: 행성 위 깜빡이는 신호등
         if (p.recent && Math.floor(now / 450) % 2 === 0) {
           bctx.fillStyle = '#7dffb2';
@@ -557,15 +646,16 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
         const fade = p.id === hoverRef.current || p.id === dockedRef.current ? 1 : Math.min(1, (LABEL_RANGE - d) / 50);
         ctx.globalAlpha = Math.max(0, fade);
         ctx.font = `11px ${PIXEL_FONT}`;
-        const name = p.node.label.length > 26 ? `${p.node.label.slice(0, 25)}…` : p.node.label;
+        const hidden = p.backlog && !visitedRef.current.has(p.id);
+        const name = hidden ? '???' : p.node.label.length > 26 ? `${p.node.label.slice(0, 25)}…` : p.node.label;
         const w = Math.ceil(ctx.measureText(name).width) + 10;
         ctx.fillStyle = 'rgba(4,5,11,0.78)';
         ctx.fillRect(Math.round(sx - w / 2), Math.round(sy), w, 28);
         ctx.fillStyle = '#eef1f8';
         ctx.fillText(name, Math.round(sx), Math.round(sy + 3));
         ctx.font = `9px ${PIXEL_FONT}`;
-        ctx.fillStyle = p.color;
-        ctx.fillText(formatHours(p.node.hours).toUpperCase(), Math.round(sx), Math.round(sy + 16));
+        ctx.fillStyle = hidden ? '#9099b6' : p.color;
+        ctx.fillText(hidden ? 'UNCHARTED' : p.backlog ? 'BACKLOG · 0H' : formatHours(p.node.hours).toUpperCase(), Math.round(sx), Math.round(sy + 16));
       }
       ctx.globalAlpha = 1;
 
@@ -575,7 +665,7 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
         const mctx = mm.getContext('2d')!;
         const ap2 = autopilot.current;
         const apPlanet = ap2?.planetId ? wld.planetById.get(ap2.planetId) : undefined;
-        drawMinimap(mctx, minimap, {
+        drawMinimap(mctx, minimap, wld, visitedRef.current, {
           ship: s,
           view: { w: W, h: H, cx: cam.x, cy: cam.y },
           target: apPlanet ? { x: apPlanet.x, y: apPlanet.y } : ap2 ? { x: ap2.x, y: ap2.y } : undefined,
@@ -595,7 +685,7 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
       canvas.removeEventListener('mousemove', onMove);
       canvas.removeEventListener('mouseleave', onLeave);
     };
-  }, [ship, nebulae, minimap]);
+  }, [ship, nebulae, minimap, storageKey]);
 
   const near = nearId ? world.planetById.get(nearId) : undefined;
   const sector = sectorId !== null ? world.sectors.find((s) => s.id === sectorId) : undefined;
@@ -639,23 +729,45 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
                   <span className="font-pixel w-3 text-[9px] text-white/35">{i < 9 ? i + 1 : ''}</span>
                   <span className="h-2 w-2 shrink-0" style={{ background: s.color }} />
                   <span className={`min-w-0 flex-1 truncate text-[11.5px] ${here ? 'text-white' : 'text-white/70'}`}>{s.name}</span>
-                  <span className="font-pixel text-[9px] text-white/35">{s.planets.length}</span>
+                  {(() => {
+                    const seen = s.planets.filter((p) => visitedRef.current.has(p.id)).length;
+                    const done = seen === s.planets.length;
+                    return (
+                      <span className={`font-pixel text-[9px] ${done ? 'text-[#7dffb2]' : 'text-white/40'}`} title={`${s.planets.length}개 중 ${seen}개 탐사`}>
+                        {done ? '★ ' : ''}
+                        {seen}/{s.planets.length}
+                      </span>
+                    );
+                  })()}
                 </button>
               </li>
             );
           })}
         </ul>
+        <button
+          type="button"
+          onClick={resetExploration}
+          className="mt-2 w-full border-t border-white/[0.06] pt-2 text-left text-[11px] text-white/35 transition hover:text-white/70"
+        >
+          탐사 기록 초기화
+        </button>
       </div>
 
-      {/* 우상단: 계기판 */}
-      <div className="font-pixel pointer-events-none absolute right-4 top-4 z-10 text-right text-[9px] leading-[1.9] tracking-[0.18em] text-white/45">
-        <div>
-          X <span className="text-white/80">{hud.x}</span> · Y <span className="text-white/80">{hud.y}</span>
+      {/* 우상단: 탐사율 + 계기판 */}
+      <ExplorationPanel world={world} visited={visitedRef.current} version={visitedVersion} hud={hud} />
+
+      {/* 발견 알림 */}
+      {toast && (
+        <div key={toast.key} className="voyage-toast pointer-events-none absolute left-1/2 top-[24%] z-20 text-center">
+          <div className="border-2 bg-[#070912]/95 px-6 py-3.5 [box-shadow:4px_4px_0_rgba(0,0,0,0.6)]" style={{ borderColor: toast.color }}>
+            <div className="font-pixel text-[11px] tracking-[0.24em]" style={{ color: toast.color }}>
+              {toast.title}
+            </div>
+            <div className="mt-1.5 text-[18px] font-semibold text-white">{toast.name}</div>
+            <div className="mt-1 text-[12.5px] text-white/60">{toast.sub}</div>
+          </div>
         </div>
-        <div>
-          SPD <span className="text-white/80">{hud.speed}</span>
-        </div>
-      </div>
+      )}
 
       {/* 하단 중앙: 도킹 안내 */}
       {near && !dockedId && (
@@ -675,7 +787,7 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
           <div className="mb-2 flex items-center justify-between gap-3">
             <span className="font-pixel text-[11px] tracking-[0.25em] text-white/60">MAP</span>
             <span className="max-w-[300px] truncate text-[12.5px] font-medium" style={{ color: mapHover?.color ?? 'rgba(255,255,255,0.45)' }}>
-              {mapHover ? mapHover.node.label : 'M 키로 숨기기'}
+              {mapHover ? (mapHover.backlog && !visitedRef.current.has(mapHover.id) ? '??? · 미탐사 행성' : mapHover.node.label) : 'M 키로 숨기기'}
             </span>
           </div>
           <div className="relative" style={{ width: MW * MAP_SCALE, height: MH * MAP_SCALE }}>
@@ -749,7 +861,7 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
 
       {/* 우측: 도킹한 행성 정보 */}
       {dockedId && world.planetById.get(dockedId) && (
-        <aside className="fade-up absolute bottom-4 right-4 top-16 z-10 flex w-[340px] flex-col overflow-hidden border-2 border-[#7dffb2]/40 bg-[#070912]/95 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]">
+        <aside className="fade-up absolute bottom-4 right-4 top-[150px] z-10 flex w-[340px] flex-col overflow-hidden border-2 border-[#7dffb2]/40 bg-[#070912]/95 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]">
           <div className="flex items-center justify-between border-b-2 border-white/[0.06] px-3 py-2">
             <span className="font-pixel text-[9px] tracking-[0.25em] text-[#7dffb2]">DOCKED</span>
             <button type="button" onClick={() => setDockedId(null)} className="font-pixel text-[9px] tracking-[0.2em] text-white/50 hover:text-white">
@@ -775,6 +887,50 @@ export function VoyageView({ graph, onOpenInExplorer }: Props) {
           </div>
         </aside>
       )}
+    </div>
+  );
+}
+
+/** 우상단 탐사율 패널. version은 탐사 기록이 바뀔 때 다시 그리기 위한 값 */
+function ExplorationPanel({
+  world,
+  visited,
+  version,
+  hud,
+}: {
+  world: World;
+  visited: Set<string>;
+  version: number;
+  hud: { x: number; y: number; speed: number };
+}) {
+  void version;
+  const total = world.planets.length;
+  const seen = world.planets.filter((p) => visited.has(p.id)).length;
+  const fogLeft = world.planets.filter((p) => p.backlog && !visited.has(p.id)).length;
+  const pct = total ? Math.round((seen / total) * 100) : 0;
+  const CELLS = 20;
+  const filled = total ? Math.round((seen / total) * CELLS) : 0;
+  return (
+    <div className="pointer-events-none absolute right-4 top-4 z-10 w-[236px] border-2 border-white/15 bg-[#070912]/92 p-3 [box-shadow:4px_4px_0_rgba(0,0,0,0.5)]">
+      <div className="flex items-baseline justify-between">
+        <span className="font-pixel text-[11px] tracking-[0.2em] text-white/60">EXPLORED</span>
+        <span className="font-pixel text-[22px] leading-none text-white">{pct}%</span>
+      </div>
+      <div className="mt-2 flex gap-[2px]">
+        {Array.from({ length: CELLS }, (_, i) => (
+          <span key={i} className="h-2.5 flex-1" style={{ background: i < filled ? '#7dffb2' : 'rgba(255,255,255,0.08)' }} />
+        ))}
+      </div>
+      <div className="mt-2 flex justify-between text-[12px] text-white/60">
+        <span>
+          행성 {seen}/{total}
+        </span>
+        {fogLeft > 0 && <span className="text-[#9099b6]">안개 {fogLeft}개 남음</span>}
+      </div>
+      <div className="font-pixel mt-2 border-t border-white/[0.06] pt-2 text-[9px] tracking-[0.16em] text-white/40">
+        X <span className="text-white/75">{hud.x}</span> · Y <span className="text-white/75">{hud.y}</span> · SPD{' '}
+        <span className="text-white/75">{hud.speed}</span>
+      </div>
     </div>
   );
 }

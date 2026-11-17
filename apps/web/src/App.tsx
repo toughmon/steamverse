@@ -208,6 +208,7 @@ export default function App() {
           <Suspense fallback={<div className="h-full bg-[#04050b]" />}>
             <VoyageView
               graph={graph}
+              playerId={source === 'sample' ? 'sample' : library.player.steamid}
               onOpenInExplorer={(id) => {
                 setSelectedId(id);
                 setView('explorer');

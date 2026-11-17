@@ -58,20 +58,14 @@ export function buildMinimap(world: World): Minimap {
     }
   }
 
-  // 행성: 큰 행성(많이 한 게임)은 2×2
-  for (const p of world.planets) {
-    const m = toMap(p.x, p.y);
-    const big = p.r >= 16;
-    ctx.fillStyle = p.favorite ? '#ffd8a0' : p.color;
-    ctx.fillRect(Math.round(m.x) - (big ? 1 : 0), Math.round(m.y) - (big ? 1 : 0), big ? 2 : 1, big ? 2 : 1);
-  }
-
   return { base, toMap, toWorld, scale };
 }
 
 export function drawMinimap(
   ctx: CanvasRenderingContext2D,
   map: Minimap,
+  world: World,
+  visited: Set<string>,
   state: {
     ship: { x: number; y: number; angle: number };
     view: { w: number; h: number; cx: number; cy: number };
@@ -82,6 +76,18 @@ export function drawMinimap(
 ) {
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(map.base, 0, 0);
+
+  // 행성: 큰 행성(많이 한 게임)은 2×2. 가 본 행성은 밝게, 안 가 본 행성은 흐리게, 안개 행성은 회색
+  for (const p of world.planets) {
+    const m = map.toMap(p.x, p.y);
+    const big = p.r >= 16;
+    const seen = visited.has(p.id);
+    if (p.backlog && !seen) ctx.fillStyle = '#59627a';
+    else ctx.fillStyle = p.favorite ? '#ffd8a0' : p.color;
+    ctx.globalAlpha = seen || p.backlog ? 1 : 0.45;
+    ctx.fillRect(Math.round(m.x) - (big ? 1 : 0), Math.round(m.y) - (big ? 1 : 0), big ? 2 : 1, big ? 2 : 1);
+  }
+  ctx.globalAlpha = 1;
 
   // 지금 화면에 보이는 범위
   const a = map.toMap(state.view.cx - state.view.w / 2, state.view.cy - state.view.h / 2);

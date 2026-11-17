@@ -197,3 +197,58 @@ export function nebulaSprite(radius: number, color: string, seed: number): HTMLC
   }
   return c;
 }
+
+// ── 안개 (미탐사 백로그 행성) ────────────────────────────────────
+const QMARK = ['01110', '10001', '00001', '00110', '00100', '00000', '00100'];
+const FOG_SHADES = ['#262c3f', '#3c4460', '#5f6886', '#9099b6'];
+
+export interface FogSprite {
+  canvas: HTMLCanvasElement;
+  data: ImageData;
+}
+
+/** 행성보다 조금 큰 디더링 구름 + 가운데 물음표. 반환 캔버스 한 변 = 2R */
+export function fogSprite(r: number, seed: number): FogSprite {
+  const R = Math.round(r * 1.35) + 3;
+  const size = R * 2;
+  const c = makeCanvas(size, size);
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  const noise = valueNoise(seed);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const d = Math.hypot(x + 0.5 - R, y + 0.5 - R) / R;
+      if (d > 1) continue;
+      const n = noise(x * 0.2, y * 0.2) * 0.7 + noise(x * 0.5 + 9, y * 0.5) * 0.3;
+      const v = (1 - d * d) * 1.3 * (0.5 + n * 0.7);
+      const lvl = Math.floor(v * 4 + bayer(x, y) - 0.5);
+      if (lvl <= 0) continue;
+      ctx.fillStyle = FOG_SHADES[Math.min(FOG_SHADES.length - 1, lvl)]!;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  // 물음표: 행성이 클수록 크게, 그림자 한 칸
+  const k = Math.max(1, Math.floor(r / 7));
+  const qx = R - Math.floor((5 * k) / 2);
+  const qy = R - Math.floor((7 * k) / 2);
+  for (const [color, off] of [['#0b0d16', k], ['#e4eaff', 0]] as const) {
+    ctx.fillStyle = color;
+    QMARK.forEach((row, yy) => [...row].forEach((b, xx) => b === '1' && ctx.fillRect(qx + xx * k + off, qy + yy * k + off, k, k)));
+  }
+  return { canvas: c, data: ctx.getImageData(0, 0, size, size) };
+}
+
+/** 안개가 걷히는 효과: 픽셀마다 정해진 문턱값보다 t가 커지면 그 픽셀을 지운다 */
+export function dissolveFog(fog: FogSprite, t: number): HTMLCanvasElement {
+  const { width, height } = fog.data;
+  const out = makeCanvas(width, height);
+  const img = new ImageData(new Uint8ClampedArray(fog.data.data), width, height);
+  const d = img.data;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const rnd = ((Math.imul(x, 73856093) ^ Math.imul(y, 19349663)) >>> 0) % 1000 / 1000;
+      if (rnd * 0.6 + bayer(x, y) * 0.4 < t) d[(y * width + x) * 4 + 3] = 0;
+    }
+  }
+  out.getContext('2d')!.putImageData(img, 0, 0);
+  return out;
+}

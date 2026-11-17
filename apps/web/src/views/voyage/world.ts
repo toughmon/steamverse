@@ -22,6 +22,8 @@ export interface Planet {
   color: string;
   favorite: boolean;
   recent: boolean;
+  /** 한 번도 안 한 게임 — 탐사 전에는 안개에 싸여 있다 */
+  backlog: boolean;
   /** 자전 속도·고리 기울기 등 개체마다 다른 값 */
   seed: number;
 }
@@ -117,6 +119,7 @@ export function buildWorld(graph: OntologyGraph): World {
       color,
       favorite: n.game!.status === 'favorite',
       recent: n.game!.hours2w > 0,
+      backlog: n.game!.status === 'backlog',
       seed: hashString(n.id),
     }));
     placePlanets(sectorPlanets, 0, 0);
