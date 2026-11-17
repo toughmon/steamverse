@@ -1,6 +1,6 @@
 import { Suspense, lazy, useMemo, useState } from 'react';
 import { buildOntologyGraph } from '@steamverse/shared';
-import { useLibrary, type CatalogState } from './data/useLibrary';
+import { readSavedSource, saveSource, useLibrary, type AccountState, type AccountWarning, type CatalogState, type Source } from './data/useLibrary';
 import { ExplorerView } from './views/ExplorerView';
 import { OntologyView } from './views/OntologyView';
 import { formatNumber, percent } from './lib/format';
@@ -52,35 +52,90 @@ function Kpi({ label, value, unit, sub }: { label: string; value: string; unit?:
   );
 }
 
-/** 데이터 출처 표시: 상점 정보가 실데이터인지, 받는 중인지, 서버가 꺼져 샘플인지 */
-function DataPill({ catalog }: { catalog: CatalogState }) {
-  const base = 'flex items-center gap-1.5 rounded-full border px-2 py-[3px] font-mono text-[9px] tracking-[0.14em]';
-  if (catalog.phase === 'live') {
-    return (
-      <span className={`${base} border-emerald-300/20 text-emerald-200/75`} title="게임 정보(회사·장르·태그·가격)는 Steam 상점 실데이터, 플레이 기록은 샘플">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_6px_rgba(110,231,183,0.8)]" />
-        STORE LIVE · PLAYTIME SAMPLE
-      </span>
-    );
+const WARNING_TEXT: Record<AccountWarning, string> = {
+  'games-private': '게임 세부 정보가 비공개라 보유 게임을 받지 못했습니다',
+  'friends-private': '친구 목록이 비공개라 친구를 받지 못했습니다',
+  'achievements-private': '게임 세부 정보가 비공개라 업적을 받지 못했습니다',
+};
+const UNAVAILABLE_TEXT: Record<Extract<AccountState, { phase: 'unavailable' }>['reason'], string> = {
+  'no-key': '.env에 STEAM_API_KEY가 없습니다',
+  'no-user': '.env에 STEAM_TEST_USER가 없습니다',
+  'not-found': 'Steam 계정을 찾지 못했습니다',
+  offline: 'API 서버에 연결하지 못했습니다',
+  'steam-failed': 'Steam에서 정보를 받지 못했습니다',
+};
+
+/** 데이터 출처 전환 + 상태: 내 계정인지 샘플인지, 상점 정보를 받는 중인지, 비공개 설정 때문에 빠진 게 있는지 */
+function SourceSwitch({
+  source,
+  onChange,
+  catalog,
+  account,
+}: {
+  source: Source;
+  onChange: (s: Source) => void;
+  catalog: CatalogState;
+  account: AccountState;
+}) {
+  const seg = (active: boolean) =>
+    `flex items-center gap-1.5 rounded-full px-2.5 py-[3px] text-[10.5px] transition ${active ? 'bg-white/[0.09] text-white' : 'text-white/40 hover:text-white/70'}`;
+
+  let dot = 'bg-white/30';
+  let status = '';
+  let title = '';
+  if (account.phase === 'unavailable') {
+    dot = 'bg-amber-300';
+    status = 'SAMPLE · 계정 연결 안 됨';
+    title = UNAVAILABLE_TEXT[account.reason];
+  } else if (account.phase === 'loading' || catalog.phase === 'connecting') {
+    dot = 'bg-sky-300 animate-pulse';
+    status = 'LOADING';
+  } else if (catalog.phase === 'syncing') {
+    dot = 'bg-sky-300 animate-pulse';
+    status = `STORE SYNC ${catalog.status.ready}/${catalog.status.total}`;
+    title = 'Steam 상점 정보를 받는 중 (처음 한 번은 게임 수에 따라 몇 분 걸립니다)';
+  } else if (catalog.phase === 'offline') {
+    dot = 'bg-amber-300';
+    status = 'OFFLINE';
+    title = UNAVAILABLE_TEXT.offline;
+  } else {
+    dot = 'bg-emerald-300 shadow-[0_0_6px_rgba(110,231,183,0.8)]';
+    status = account.phase === 'ok' ? 'STEAM LIVE' : 'STORE LIVE · PLAYTIME SAMPLE';
   }
-  if (catalog.phase === 'syncing') {
-    const { ready, total } = catalog.status;
-    return (
-      <span className={`${base} border-sky-300/20 text-sky-200/75`} title="Steam 상점 정보를 받는 중 (요청 간격 제한 때문에 처음 한 번은 몇 분 걸린다)">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300" />
-        STORE SYNC {ready}/{total}
-      </span>
-    );
-  }
+  const warnings = account.phase === 'ok' ? account.warnings : [];
+
   return (
-    <span className={`${base} border-amber-200/20 text-amber-200/70`} title={catalog.phase === 'offline' ? 'API 서버에 연결하지 못해 샘플 데이터를 보여 준다' : undefined}>
-      SAMPLE DATA
-    </span>
+    <div className="flex items-center gap-2.5">
+      <div className="flex items-center rounded-full border border-white/[0.08] bg-white/[0.02] p-[2px]" role="radiogroup" aria-label="데이터 출처">
+        <button type="button" role="radio" aria-checked={source === 'steam'} className={seg(source === 'steam')} onClick={() => onChange('steam')}>
+          {source === 'steam' && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}내 계정
+        </button>
+        <button type="button" role="radio" aria-checked={source === 'sample'} className={seg(source === 'sample')} onClick={() => onChange('sample')}>
+          {source === 'sample' && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}샘플
+        </button>
+      </div>
+      <span className="font-mono text-[9px] tracking-[0.14em] text-white/40" title={title || undefined}>
+        {status}
+      </span>
+      {warnings.length > 0 && (
+        <span
+          className="cursor-help rounded-full border border-amber-200/25 px-1.5 py-[2px] font-mono text-[9px] tracking-[0.1em] text-amber-200/80"
+          title={[...warnings.map((w) => WARNING_TEXT[w]), 'Steam → 프로필 편집 → 개인정보 설정에서 공개로 바꾸면 다음 동기화 때 채워집니다'].join('\n')}
+        >
+          ! 비공개 {warnings.length}
+        </span>
+      )}
+    </div>
   );
 }
 
 export default function App() {
-  const { library, catalog } = useLibrary();
+  const [source, setSourceState] = useState<Source>(readSavedSource);
+  const setSource = (s: Source) => {
+    setSourceState(s);
+    saveSource(s);
+  };
+  const { library, catalog, account } = useLibrary(source);
   const graph = useMemo(() => buildOntologyGraph(library), [library]);
   const [view, setView] = useState<View>('explorer');
   const [rawSelectedId, setSelectedId] = useState<string | null>(null);
@@ -94,7 +149,7 @@ export default function App() {
         <div className="flex items-center gap-3">
           <Logo />
           <span className="text-[13px] font-semibold tracking-[0.22em] text-white">STEAMVERSE</span>
-          <DataPill catalog={catalog} />
+          <SourceSwitch source={source} onChange={setSource} catalog={catalog} account={account} />
         </div>
 
         <nav className="flex items-center rounded-full border border-white/[0.07] bg-white/[0.025] p-1">

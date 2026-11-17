@@ -57,6 +57,47 @@ export function edgeStyle(e: OntEdge): { size: number; color: string; type: 'cur
   }
 }
 
+/** '#rrggbb' 또는 'rgba(r,g,b,a)' → 성분 */
+export function parseColor(c: string): { r: number; g: number; b: number; a: number } {
+  if (c.startsWith('#')) {
+    const n = parseInt(c.slice(1, 7), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255, a: 1 };
+  }
+  const [r = 0, g = 0, b = 0, a = 1] = c.replace(/[^\d.,]/g, '').split(',').map(Number);
+  return { r, g, b, a };
+}
+
+/** 성분 + 알파 → premultiplied rgba (엣지 셰이더도 색을 그대로 내보내므로 미리 곱해야 한다) */
+export function premulRgba({ r, g, b }: { r: number; g: number; b: number }, alpha: number): string {
+  return `rgba(${Math.round(r * alpha)},${Math.round(g * alpha)},${Math.round(b * alpha)},${alpha.toFixed(3)})`;
+}
+
+const smoothstep = (e0: number, e1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * 선 스타일 (A: 평소엔 거의 숨김, D: 길이에 따라 다르게).
+ * - longness: 0 = 짧은 선, 1 = 화면을 가로지르는 선
+ * - 평소: 짧은 선 16% → 긴 선 5% 투명도, 긴 선일수록 가늘고 곧게
+ * - 강조(마우스·선택): 이 노드의 선만 또렷하게, 그래도 긴 선은 덜 휘게
+ */
+export function edgeLook(
+  data: { color: string; size: number; curvature: number },
+  length: number,
+  extent: number,
+  focused: boolean,
+): { color: string; size: number; curvature: number } {
+  const longness = smoothstep(0.06, 0.45, length / Math.max(1, extent));
+  const base = parseColor(data.color);
+  const curvature = data.curvature * (1 - 0.85 * longness);
+  if (focused) return { color: premulRgba(base, 0.9), size: data.size * 1.6, curvature };
+  // 원래 반투명한 관계(추론 등)는 평소에 조금 더 옅게
+  const alpha = (0.16 - 0.11 * longness) * (base.a < 1 ? 0.75 : 1);
+  return { color: premulRgba(base, alpha), size: data.size * (1 - 0.45 * longness), curvature };
+}
+
 /**
  * Sigma는 premultiplied alpha로 섞는다(blendFunc ONE, ONE_MINUS_SRC_ALPHA).
  * 반투명 노드 색은 RGB에 알파를 미리 곱해 줘야 밝은 점으로 뜨지 않는다.

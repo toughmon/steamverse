@@ -74,8 +74,12 @@ export interface StoreApp {
   /** 원 단위 (Store API의 1/100 단위를 환산) */
   price?: { currency: string; initial: number; final: number; discountPercent: number };
   metacritic?: number;
+  /** 상점이 주는 실제 이미지 주소 (최근 게임은 해시 경로라 규칙으로 못 만든다) */
+  images?: { header?: string; capsule?: string };
   platforms: { windows: boolean; mac: boolean; linux: boolean };
-  sources: ('store' | 'steamspy')[];
+  sources: ('store' | 'storetags' | 'steamspy')[];
+  /** 카탈로그 형식 버전. 서버가 형식을 바꾸면 예전 캐시를 다시 받는다 */
+  schema?: number;
   fetchedAt: string;
 }
 

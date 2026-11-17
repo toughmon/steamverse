@@ -119,7 +119,18 @@ export function slug(text: string): string {
 
 export type SteamImageKind = 'header' | 'capsule' | 'library' | 'hero';
 
+/**
+ * 최근 게임은 이미지가 해시가 붙은 경로(store_item_assets/.../<hash>/header.jpg)에 있어
+ * 고정 규칙으로 만든 주소가 깨진다. 상점 정보에서 받은 실제 주소를 여기 등록해 두면 그걸 쓴다.
+ */
+const imageOverrides = new Map<number, Partial<Record<SteamImageKind, string>>>();
+export function registerSteamImages(appid: number, images: Partial<Record<SteamImageKind, string>>) {
+  imageOverrides.set(appid, { ...imageOverrides.get(appid), ...images });
+}
+
 export function steamImage(appid: number, kind: SteamImageKind = 'header'): string {
+  const override = imageOverrides.get(appid)?.[kind];
+  if (override) return override;
   const file = {
     header: 'header.jpg',
     capsule: 'capsule_231x87.jpg',
@@ -369,12 +380,14 @@ export function buildOntologyGraph(lib: LibraryData): OntologyGraph {
       for (const id of ids) {
         const n = nodeById.get(id)!;
         hours += n.hours;
-        for (const t of n.game!.tags) tagScore.set(t, (tagScore.get(t) ?? 0) + 1 + Math.log1p(n.hours));
+        // 태그가 없는 게임(상점 정보가 아직 없거나 아주 새 게임)은 장르로 대신한다
+        const labels = n.game!.tags.length ? n.game!.tags : n.game!.genres;
+        for (const t of labels) tagScore.set(t, (tagScore.get(t) ?? 0) + 1 + Math.log1p(n.hours));
       }
       const topTags = [...tagScore.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t).slice(0, 3);
       return {
         id: key,
-        name: key === OTHER ? '기타 취향' : topTags.slice(0, 2).join(' · '),
+        name: key === OTHER ? '기타 취향' : topTags.slice(0, 2).join(' · ') || '미분류',
         topTags,
         gameIds: ids,
         hours,

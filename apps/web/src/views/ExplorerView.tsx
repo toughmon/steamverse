@@ -24,7 +24,7 @@ import { NodeDetail } from '../components/NodeDetail';
 import { SearchBox } from '../components/SearchBox';
 import { Toggle } from '../components/Toggle';
 import { formatHours } from '../lib/format';
-import { LABEL_FONT, curvatureFor, drawDarkHover, drawHaloLabel, edgeStyle, nodeColor, nodeSize, premultiplied } from '../lib/sigmaStyle';
+import { LABEL_FONT, curvatureFor, drawDarkHover, edgeLook, drawHaloLabel, edgeStyle, nodeColor, nodeSize, premultiplied } from '../lib/sigmaStyle';
 
 interface Props {
   graph: OntologyGraph;
@@ -219,6 +219,18 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
   const visibleRelations = useMemo(() => new Set(visible.edges.map((e) => e.rel)), [visible]);
 
   // ── 이웃 집합 갱신 ────────────────────────────────────────────
+  /** 그래프 전체 크기. 선이 '긴지' 판단하는 기준 */
+  const extentRef = useRef(1);
+  const updateExtent = (g: Pick<Graph, 'forEachNode'>) => {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    g.forEachNode((_, a) => {
+      const { x, y } = a as { x: number; y: number };
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+      y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    });
+    extentRef.current = Number.isFinite(x0) ? Math.max(1, x1 - x0, y1 - y0) : 1;
+  };
+
   const updateNeighbors = () => {
     const sigma = sigmaRef.current;
     const st = interaction.current;
@@ -291,11 +303,14 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
       edgeReducer: (edge, data) => {
         const st = interaction.current;
         const focusId = st.hovered ?? st.selected;
-        if (!focusId) return data;
         const g = sigmaRef.current!.getGraph();
         const [s, t] = g.extremities(edge);
-        if (s !== focusId && t !== focusId) return { ...data, hidden: true };
-        return { ...data, size: (data.size as number) * 1.6, zIndex: 1, color: (data.color as string).replace(/[\d.]+\)$/, '0.95)') };
+        const focused = !!focusId && (s === focusId || t === focusId);
+        if (focusId && !focused) return { ...data, hidden: true };
+        const a = g.getNodeAttributes(s);
+        const b = g.getNodeAttributes(t);
+        const look = edgeLook(data as { color: string; size: number; curvature: number }, Math.hypot(a.x - b.x, a.y - b.y), extentRef.current, focused);
+        return { ...data, ...look, zIndex: focused ? 1 : 0 };
       },
     });
     sigmaRef.current = sigma;
@@ -409,6 +424,7 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
     if (projected || modeChanged) g.forEachNode((id) => g.mergeNodeAttributes(id, { x: (rand() - 0.5) * 200, y: (rand() - 0.5) * 200 }));
     runLayout(g, projected || modeChanged || newcomers > visible.nodes.length / 2 ? 400 : 120);
     g.forEachNode((id, a) => known.set(id, { x: a.x, y: a.y }));
+    updateExtent(g);
 
     sigma.setCustomBBox(null);
     sigma.setGraph(g as unknown as Graph);
@@ -479,6 +495,8 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
       layout.kill();
       fa2Ref.current = null;
       g.forEachNode((id, a) => positions.current.set(id, { x: a.x, y: a.y }));
+      updateExtent(g);
+      sigma.refresh({ skipIndexation: true });
     }, ms);
   }
   const relayout = () => settle(2500, 6);
@@ -620,7 +638,7 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
             <span className="text-white/70">{visible.edges.length}</span> EDGES
           </span>
           <span className="h-3 w-px bg-white/10" />
-          <span>SIZE = PLAYTIME · RING = STATUS · STRONG CURVE = INFERRED</span>
+          <span>SIZE = PLAYTIME · RING = STATUS · HOVER = TRACE LINKS</span>
         </div>
         <div className="pointer-events-none absolute right-5 bottom-4 font-mono text-[10px] tracking-wider text-white/25">
           DRAG · SCROLL · DRAG NODE TO PIN

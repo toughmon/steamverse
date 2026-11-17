@@ -8,7 +8,7 @@ import { RateLimitedError, createThrottle } from '../lib/throttle';
 export const steamspyQueue = createThrottle('steamspy', 1100);
 
 /** 취향과 무관해서 유사도·은하 계산을 흐리는 일반 태그 */
-const GENERIC_TAGS = new Set([
+export const GENERIC_TAGS = new Set([
   'Singleplayer',
   'Great Soundtrack',
   'Steam Achievements',

@@ -18,10 +18,11 @@ export function LongTail({ graph, onOpen }: { graph: OntologyGraph; onOpen: (id:
     let acc = 0;
     const cum = games.map((g) => (acc += g.hours) / total);
     const half = cum.findIndex((c) => c >= 0.5) + 1;
-    const top5 = cum[4] ?? 1;
+    const topN = Math.min(5, cum.length);
+    const top5 = cum[topN - 1] ?? 1;
     const tailStart = games.findIndex((g) => g.hours < 2);
     const tail = tailStart < 0 ? 0 : games.length - tailStart;
-    return { games, total, cum, half, top5, tailStart, tail };
+    return { games, total, cum, half, top5, topN, tailStart, tail };
   }, [graph]);
 
   const iw = Math.max(0, width - M.l - M.r);
@@ -51,7 +52,7 @@ export function LongTail({ graph, onOpen }: { graph: OntologyGraph; onOpen: (id:
       aside={
         <>
           <p className="text-[12.5px] leading-relaxed text-white/50">
-            상위 5개 게임이 전체 {Math.round(d.total).toLocaleString()}시간 중 {Math.round(d.top5 * 100)}%를 차지합니다. 나머지{' '}
+            상위 {d.topN}개 게임이 전체 {Math.round(d.total).toLocaleString()}시간 중 {Math.round(d.top5 * 100)}%를 차지합니다. 나머지{' '}
             {d.tail}개는 2시간도 채 하지 않은 평원입니다.
           </p>
           <ol className="flex flex-col divide-y divide-white/[0.05] rounded-xl border border-white/[0.07]">

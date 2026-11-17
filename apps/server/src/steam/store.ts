@@ -20,6 +20,8 @@ export interface RawAppDetails {
   price_overview?: { currency: string; initial: number; final: number; discount_percent: number };
   metacritic?: { score: number };
   platforms?: { windows: boolean; mac: boolean; linux: boolean };
+  header_image?: string;
+  capsule_image?: string;
 }
 
 async function requestDetails(appid: number, cc: string): Promise<RawAppDetails | null> {

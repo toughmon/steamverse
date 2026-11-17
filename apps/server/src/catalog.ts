@@ -2,6 +2,10 @@ import type { CatalogResponse, StoreApp } from '@steamverse/shared';
 import { cacheGet, cacheSet } from './lib/cache';
 import { fetchAppDetails } from './steam/store';
 import { fetchTags } from './steam/steamspy';
+import { fetchStoreTags } from './steam/storetags';
+
+/** 2: 이미지 주소, 공식 상점 태그 */
+const SCHEMA = 2;
 
 /** 상점 정보는 자주 안 바뀐다. 가격은 할인 때문에 바뀌지만 일주일이면 충분 */
 const TTL = 7 * 24 * 3600 * 1000;
@@ -18,11 +22,14 @@ function parseYear(date?: string): number | undefined {
 
 async function load(appid: number): Promise<StoreApp | null> {
   try {
-    const [details, tags] = await Promise.all([
+    const [details, officialTags] = await Promise.all([
       fetchAppDetails(appid),
       // 태그는 없어도 되는 정보라 실패해도 전체를 실패로 보지 않는다
-      fetchTags(appid).catch(() => null),
+      fetchStoreTags(appid).catch(() => null),
     ]);
+    // 공식 태그가 비었을 때만 SteamSpy로 보충
+    const spyTags = officialTags?.length ? null : await fetchTags(appid).catch(() => null);
+    const tags = officialTags?.length ? officialTags : (spyTags ?? officialTags);
     const app: StoreApp = {
       appid,
       available: details !== null,
@@ -42,8 +49,14 @@ async function load(appid: number): Promise<StoreApp | null> {
         discountPercent: details.price_overview.discount_percent,
       },
       metacritic: details?.metacritic?.score,
+      images: { header: details?.header_image, capsule: details?.capsule_image },
       platforms: details?.platforms ?? { windows: true, mac: false, linux: false },
-      sources: [...(details ? (['store'] as const) : []), ...(tags ? (['steamspy'] as const) : [])],
+      sources: [
+        ...(details ? (['store'] as const) : []),
+        ...(officialTags?.length ? (['storetags'] as const) : []),
+        ...(spyTags?.length ? (['steamspy'] as const) : []),
+      ],
+      schema: SCHEMA,
       fetchedAt: new Date().toISOString(),
     };
     // 태그를 못 받았으면 캐시하지 않고 다음에 다시 채운다
@@ -58,10 +71,16 @@ async function load(appid: number): Promise<StoreApp | null> {
   }
 }
 
+/** 형식이 바뀌기 전에 저장된 항목은 다시 받는다 */
+async function cached(appid: number): Promise<StoreApp | undefined> {
+  const app = await cacheGet<StoreApp>('store', String(appid), TTL);
+  return app?.schema === SCHEMA ? app : undefined;
+}
+
 /** 캐시에 있으면 바로, 없으면 받아 온다 (요청 간격 제한 때문에 오래 걸릴 수 있다) */
 export async function getApp(appid: number): Promise<StoreApp | null> {
-  const cached = await cacheGet<StoreApp>('store', String(appid), TTL);
-  if (cached) return cached;
+  const hit = await cached(appid);
+  if (hit) return hit;
   let p = inflight.get(appid);
   if (!p) {
     p = load(appid);
@@ -79,9 +98,9 @@ export async function getCatalog(appids: number[]): Promise<CatalogResponse> {
   let pending = 0;
   let failed = 0;
   for (const appid of appids) {
-    const cached = await cacheGet<StoreApp>('store', String(appid), TTL);
-    if (cached) {
-      apps.push(cached);
+    const hit = await cached(appid);
+    if (hit) {
+      apps.push(hit);
       continue;
     }
     const lastFail = failedAt.get(appid);
