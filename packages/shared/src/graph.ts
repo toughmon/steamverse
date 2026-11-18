@@ -8,7 +8,7 @@
 import Graph from 'graphology';
 import louvain from 'graphology-communities-louvain';
 import { classifyPlaytime, type ClassId, type PlayStatus, type RelationId } from './ontology';
-import type { DeckCompat, LibraryData } from './types';
+import type { AchievementUnlock, DeckCompat, LibraryData } from './types';
 
 export interface GameInfo {
   appid: number;
@@ -17,6 +17,7 @@ export interface GameInfo {
   releaseYear: number;
   lastPlayed?: string;
   achievements?: { unlocked: number; total: number };
+  achievementLog?: AchievementUnlock[];
   deck: DeckCompat;
   genres: string[];
   tags: string[];
@@ -282,6 +283,7 @@ export function buildOntologyGraph(lib: LibraryData): OntologyGraph {
         releaseYear: g.releaseYear,
         lastPlayed: g.lastPlayed,
         achievements: g.achievements,
+        achievementLog: g.achievementLog,
         deck: g.deck,
         genres: g.genres,
         tags: g.tags,

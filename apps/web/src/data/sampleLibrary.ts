@@ -4,7 +4,7 @@
  * 플레이 시간·업적·친구는 가상의 값이다.
  * 회사 이름은 일부러 표기를 섞어 두었다 (예: "Valve" / "Valve Corporation") — 정규화 확인용.
  */
-import type { DeckCompat, FriendRecord, GameRecord, LibraryData } from '@steamverse/shared';
+import type { AchievementUnlock, DeckCompat, FriendRecord, GameRecord, LibraryData } from '@steamverse/shared';
 
 type Row = [
   appid: number,
@@ -115,6 +115,41 @@ function lastPlayedFor(appid: number, hours: number, hours2w: number): string | 
   return d.toISOString().slice(0, 10);
 }
 
+/** 시드 난수 (같은 appid면 늘 같은 값) */
+function rng(seed: number) {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const SAMPLE_ACH_NAMES = ['첫걸음', '숙련자', '수집가', '탐험가', '불굴', '완벽주의자', '전설', '마라톤', '숨은 길', '한 번의 실수도 없이', '끝까지', '야행성'];
+
+/**
+ * 샘플 업적 기록 (가상): 출시 이후 ~ 마지막 플레이 사이에 해금 시각을 흩뿌리고,
+ * 전 세계 달성률도 지어낸다 (대부분 흔하고, 몇 개만 희귀하게).
+ */
+function sampleLog(appid: number, year: number, unlocked: number, lastPlayed?: string): AchievementUnlock[] {
+  if (unlocked <= 0) return [];
+  const r = rng(appid);
+  const start = Math.max(Date.UTC(year, 0, 1), Date.UTC(2014, 0, 1));
+  const end = lastPlayed ? Date.parse(lastPlayed) : SYNCED_AT.getTime();
+  if (end <= start) return [];
+  // 몰아서 하는 시기 2~3번에 해금이 뭉치게
+  const bursts = Array.from({ length: 2 + Math.floor(r() * 2) }, () => start + r() * (end - start));
+  return Array.from({ length: unlocked }, (_, i) => {
+    const center = bursts[i % bursts.length]!;
+    const t = Math.min(end, Math.max(start, center + (r() - 0.5) * 40 * 86_400_000));
+    // 대부분 흔하고, 1% 이하는 30개 중 1개꼴. 1% 아래는 소수 둘째 자리까지
+    const raw = 0.05 + 99.95 * r() ** 1.35;
+    const pct = raw < 1 ? Math.round(raw * 100) / 100 : Math.round(raw * 10) / 10;
+    return { api: `SAMPLE_${i}`, name: `${SAMPLE_ACH_NAMES[i % SAMPLE_ACH_NAMES.length]} ${Math.floor(i / SAMPLE_ACH_NAMES.length) + 1}`, t: Math.floor(t / 1000), samplePct: pct };
+  });
+}
+
 const games: GameRecord[] = ROWS.map(([appid, name, dev, pub, franchise, genres, tags, year, hours, hours2w, ach, deck]) => ({
   appid,
   name,
@@ -128,6 +163,7 @@ const games: GameRecord[] = ROWS.map(([appid, name, dev, pub, franchise, genres,
   playtime2WeeksMinutes: Math.round(hours2w * 60),
   lastPlayed: lastPlayedFor(appid, hours, hours2w),
   achievements: ach ? { unlocked: ach[0], total: ach[1] } : undefined,
+  achievementLog: ach ? sampleLog(appid, year, ach[0], lastPlayedFor(appid, hours, hours2w)) : undefined,
   deck: DECK[deck],
 }));
 

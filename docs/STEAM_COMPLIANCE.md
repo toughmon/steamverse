@@ -67,6 +67,7 @@ domain: docs
 | Web API (`api.steampowered.com`, 키 사용) | 공식 | 0.12초, 429 시 30초 정지 | 하루 10만 회 (API 약관) |
 | 상점 태그 (`IStoreBrowseService`, `IStoreService`) | 공식 호스트, 키 없음 | 0.3초, 429 시 60초 | 문서화된 한도 없음 |
 | 상점 `store.steampowered.com/api/appdetails` | **비공식** (상점 웹 내부용) | 1.6초, 429 시 90초 | 공식 한도 없음. 커뮤니티 실측 약 200회/5분/IP |
+| 업적 전 세계 달성률 (`GetGlobalAchievementPercentagesForApp`) | 공식 호스트, 키 없음 | 0.25초, 429 시 60초 | 게임 단위 공개 통계. 7일 캐시를 모든 이용자가 같이 씀 |
 | SteamSpy | 제3자 | 1.1초, 429 시 60초 | SteamSpy 문서: 대부분 초당 1회, `all` 요청은 60초에 1회. 데이터는 하루 한 번 갱신 |
 
 - **[필수]** 비공식 상점 API는 언제든 막히거나 바뀔 수 있다. 막혀도 앱이 죽지 않게 한다 (지금처럼 실패 시 샘플·캐시로 대체)

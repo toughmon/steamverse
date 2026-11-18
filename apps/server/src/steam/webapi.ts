@@ -95,13 +95,30 @@ export async function getLevel(steamid: string): Promise<number> {
   return r.response.player_level ?? 0;
 }
 
+export interface AchievementResult {
+  unlocked: number;
+  total: number;
+  /** 해금한 업적: API 이름, 표시 이름(한국어 우선), 해금 시각(unix 초) */
+  log: { api: string; name?: string; t: number }[];
+}
+
 /** 업적이 없는 게임이면 null, 게임 세부 정보가 비공개라 못 보면 'private' */
-export async function getAchievements(steamid: string, appid: number): Promise<{ unlocked: number; total: number } | null | 'private'> {
+export async function getAchievements(steamid: string, appid: number): Promise<AchievementResult | null | 'private'> {
   try {
-    const r = await call<{ playerstats: { success: boolean; achievements?: { achieved: number }[] } }>('ISteamUserStats/GetPlayerAchievements/v1', { steamid, appid });
+    const r = await call<{ playerstats: { success: boolean; achievements?: { apiname: string; achieved: number; unlocktime?: number; name?: string }[] } }>(
+      'ISteamUserStats/GetPlayerAchievements/v1',
+      // l: 표시 이름을 한국어로 (없으면 기본 언어)
+      { steamid, appid, l: 'koreana' },
+    );
     const list = r.playerstats.achievements;
     if (!r.playerstats.success || !list?.length) return null;
-    return { unlocked: list.filter((a) => a.achieved).length, total: list.length };
+    const done = list.filter((a) => a.achieved);
+    return {
+      unlocked: done.length,
+      total: list.length,
+      // 해금 시각이 0인 업적(아주 오래전 해금 등)은 캘린더에 둘 수 없어 뺀다
+      log: done.filter((a) => (a.unlocktime ?? 0) > 0).map((a) => ({ api: a.apiname, name: a.name || undefined, t: a.unlocktime! })),
+    };
   } catch (err) {
     // 업적이 없는 게임은 400을 준다
     if (err instanceof UpstreamError && err.status === 403) return 'private';

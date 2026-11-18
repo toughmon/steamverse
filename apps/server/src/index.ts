@@ -4,6 +4,7 @@ import Fastify, { type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { env } from './env';
 import { getApp, getCatalog, startPrewarm } from './catalog';
+import { getGlobalPercentages } from './globalAchievements';
 import { storeQueue } from './steam/store';
 import { steamspyQueue } from './steam/steamspy';
 import { MissingKeyError, getPlayers } from './steam/webapi';
@@ -92,6 +93,13 @@ app.get<{ Querystring: { appids?: string } }>('/api/catalog', async (req, reply)
   const appids = parseAppids(req.query.appids);
   if (!appids) return reply.code(400).send({ error: `appids는 쉼표로 구분한 양의 정수, 최대 ${MAX_APPIDS}개` });
   return getCatalog(appids);
+});
+
+/** 업적의 전 세계 달성률 (게임 단위 공개 통계, 키 불필요). 없는 것은 받기 시작하고 status.pending으로 알린다 */
+app.get<{ Querystring: { appids?: string } }>('/api/achievements/global', async (req, reply) => {
+  const appids = parseAppids(req.query.appids);
+  if (!appids) return reply.code(400).send({ error: `appids는 쉼표로 구분한 양의 정수, 최대 ${MAX_APPIDS}개` });
+  return getGlobalPercentages(appids);
 });
 
 app.get<{ Params: { appid: string } }>('/api/catalog/:appid', async (req, reply) => {

@@ -1,7 +1,7 @@
 import type { FriendRecord, GameRecord, LibraryData } from '@steamverse/shared';
 import { cacheDelete, cacheGet, cachePurge, cacheSet } from './lib/cache';
 import { assertQuota, assertUserQuota, countUserSync } from './steam/quota';
-import { getAchievements, getFriends, getLevel, getOwnedGames, getPlayers, resolveVanity } from './steam/webapi';
+import { getAchievements, getFriends, getLevel, getOwnedGames, getPlayers, resolveVanity, type AchievementResult } from './steam/webapi';
 
 /** 플레이 기록은 자주 바뀌니 짧게 */
 const TTL = 10 * 60 * 1000;
@@ -51,7 +51,7 @@ async function build(steamid: string): Promise<LibraryResponse> {
     .slice(0, MAX_ACHIEVEMENT_GAMES);
   const achResults = await Promise.all(achTargets.map(async (g) => [g.appid, await getAchievements(steamid, g.appid).catch(() => null)] as const));
   if (achResults.some(([, r]) => r === 'private')) warnings.push('achievements-private');
-  const achievements = new Map(achResults.filter((e): e is readonly [number, { unlocked: number; total: number }] => e[1] !== null && e[1] !== 'private'));
+  const achievements = new Map(achResults.filter((e): e is readonly [number, AchievementResult] => e[1] !== null && e[1] !== 'private'));
 
   const games: GameRecord[] = ownedGames.map((g) => ({
     appid: g.appid,
@@ -65,7 +65,8 @@ async function build(steamid: string): Promise<LibraryResponse> {
     playtimeMinutes: g.playtime_forever,
     playtime2WeeksMinutes: g.playtime_2weeks ?? 0,
     lastPlayed: isoDate(g.rtime_last_played),
-    achievements: achievements.get(g.appid) ?? undefined,
+    achievements: achievements.has(g.appid) ? { unlocked: achievements.get(g.appid)!.unlocked, total: achievements.get(g.appid)!.total } : undefined,
+    achievementLog: achievements.get(g.appid)?.log,
     deck: 'unknown',
   }));
 
