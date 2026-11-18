@@ -1,6 +1,7 @@
 import type { CatalogResponse, StoreApp } from '@steamverse/shared';
 import { cacheGet, cacheSet } from './lib/cache';
-import { fetchAppDetails } from './steam/store';
+import { fetchAppDetails, storeQueue } from './steam/store';
+import { fetchMostPlayed } from './steam/charts';
 import { fetchTags } from './steam/steamspy';
 import { fetchStoreTags } from './steam/storetags';
 
@@ -111,5 +112,41 @@ export async function getCatalog(appids: number[]): Promise<CatalogResponse> {
     pending++;
     if (!inflight.has(appid)) void getApp(appid);
   }
-  return { apps, status: { total: appids.length, ready: apps.length, pending, failed } };
+  // 상점 요청 줄은 모든 이용자가 같이 쓴다. 지금 줄이 다 빠지기까지의 시간이 이 사람의 최대 대기 시간이다
+  const etaSeconds = pending ? Math.ceil(storeQueue.etaMs / 1000) : 0;
+  return { apps, status: { total: appids.length, ready: apps.length, pending, failed, etaSeconds } };
+}
+
+/**
+ * 인기 게임 상점 정보 미리 채우기. 처음 오는 이용자가 기다리는 시간을 줄인다.
+ * 이용자 요청이 우선이라, 상점 요청 줄이 비어 있을 때만 한 개씩 넣는다 (요청 간격 규칙 그대로 — STEAM_COMPLIANCE L2)
+ */
+export function startPrewarm(onError: (err: unknown) => void): void {
+  const REFRESH_LIST = 24 * 3600 * 1000;
+  let list: number[] = [];
+  let listAt = 0;
+  let busy = false;
+  const tick = async () => {
+    if (busy || storeQueue.size > 0 || inflight.size > 0) return;
+    busy = true;
+    try {
+      if (Date.now() - listAt > REFRESH_LIST) {
+        list = await fetchMostPlayed();
+        listAt = Date.now();
+      }
+      for (const appid of list) {
+        if (await cached(appid)) continue;
+        const lastFail = failedAt.get(appid);
+        if (lastFail && Date.now() - lastFail < RETRY_AFTER) continue;
+        void getApp(appid);
+        return;
+      }
+    } catch (err) {
+      listAt = Date.now() - REFRESH_LIST + 10 * 60 * 1000; // 목록을 못 받았으면 10분 뒤 다시
+      onError(err);
+    } finally {
+      busy = false;
+    }
+  };
+  setInterval(() => void tick(), 5000).unref();
 }

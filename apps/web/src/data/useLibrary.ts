@@ -25,7 +25,7 @@ export type AccountState =
   | { phase: 'loading' }
   | { phase: 'ok'; warnings: AccountWarning[] }
   /** 계정을 못 불러 샘플을 대신 보여 주는 중 */
-  | { phase: 'unavailable'; reason: 'login' | 'no-key' | 'no-user' | 'not-found' | 'quota' | 'offline' | 'steam-failed' };
+  | { phase: 'unavailable'; reason: 'login' | 'no-key' | 'no-user' | 'not-found' | 'quota' | 'user-quota' | 'offline' | 'steam-failed' };
 
 /** 게임당 태그 수. 너무 많으면 태그 노드가 폭증해 그래프·은하가 흐려진다 */
 const TAGS_PER_GAME = 6;
@@ -90,7 +90,7 @@ async function loadAccount(): Promise<{ library: LibraryData; account: AccountSt
     const res = await fetch('/api/library');
     const body = (await res.json().catch(() => ({}))) as { library?: LibraryData; warnings?: AccountWarning[]; error?: string };
     if (res.ok && body.library) return { library: body.library, account: { phase: 'ok', warnings: body.warnings ?? [] } };
-    const reason = (['login', 'no-key', 'no-user', 'not-found', 'quota'] as const).find((r) => r === body.error) ?? 'steam-failed';
+    const reason = (['login', 'no-key', 'no-user', 'not-found', 'quota', 'user-quota'] as const).find((r) => r === body.error) ?? 'steam-failed';
     return { library: sampleLibrary, account: { phase: 'unavailable', reason } };
   } catch {
     return { library: sampleLibrary, account: { phase: 'unavailable', reason: 'offline' } };
@@ -116,7 +116,8 @@ export function useLibrary(source: Source): { library: LibraryData; catalog: Cat
         return;
       }
       try {
-        const appids = base.games.map((g) => g.appid).join(',');
+        // 많이 한 게임부터 받는다: 화면에서 크게 보이는 게임이 먼저 채워진다
+        const appids = [...base.games].sort((a, b) => b.playtimeMinutes - a.playtimeMinutes).map((g) => g.appid).join(',');
         const res = await fetch(`/api/catalog?appids=${appids}`);
         if (!res.ok) throw new Error(String(res.status));
         const body = (await res.json()) as CatalogResponse;

@@ -1,6 +1,9 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import Fastify, { type FastifyRequest } from 'fastify';
+import fastifyStatic from '@fastify/static';
 import { env } from './env';
-import { getApp, getCatalog } from './catalog';
+import { getApp, getCatalog, startPrewarm } from './catalog';
 import { storeQueue } from './steam/store';
 import { steamspyQueue } from './steam/steamspy';
 import { MissingKeyError, getPlayers } from './steam/webapi';
@@ -18,7 +21,7 @@ import {
   sessionSteamId,
 } from './auth';
 import { ProfileNotFoundError, deleteLibrary, getLibrary, purgeLibraries, resolveSteamId } from './library';
-import { QuotaError, usage } from './steam/quota';
+import { QuotaError, UserQuotaError, usage } from './steam/quota';
 import { loadBlockedImages } from './blockedImages';
 
 /**
@@ -26,6 +29,8 @@ import { loadBlockedImages } from './blockedImages';
  * 오류는 이름·메시지·스택만 — cause 등 딸린 객체에 요청 정보가 섞이지 않게 (STEAM_COMPLIANCE K2)
  */
 const app = Fastify({
+  // HTTPS를 끝내는 리버스 프록시 뒤에서는 X-Forwarded-* 를 믿어야 실제 프로토콜·IP를 안다
+  trustProxy: env.trustProxy,
   logger: {
     level: 'info',
     serializers: {
@@ -33,6 +38,32 @@ const app = Fastify({
       err: (err: Error) => ({ type: err.name, message: err.message, stack: err.stack ?? '' }),
     },
   },
+});
+
+/**
+ * 보안 헤더. 외부에서 불러오는 것은 Steam 이미지(steamstatic), 글꼴(jsdelivr·Google Fonts)뿐이다.
+ * Sigma 배치 계산은 blob: 워커를 쓴다.
+ */
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
+  "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com data:",
+  "img-src 'self' data: blob: https://*.steamstatic.com",
+  "connect-src 'self'",
+  "worker-src 'self' blob:",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self' https://steamcommunity.com",
+].join('; ');
+
+app.addHook('onSend', async (req, reply) => {
+  reply.header('x-content-type-options', 'nosniff');
+  reply.header('referrer-policy', 'strict-origin-when-cross-origin');
+  reply.header('x-frame-options', 'DENY');
+  if (env.publicOrigin?.startsWith('https://')) reply.header('strict-transport-security', 'max-age=31536000');
+  // CSP는 웹 화면에만 (API 응답·리다이렉트에는 필요 없다)
+  if (!req.url.startsWith('/api/')) reply.header('content-security-policy', CSP);
 });
 
 const MAX_APPIDS = 500;
@@ -72,7 +103,13 @@ app.get<{ Params: { appid: string } }>('/api/catalog/:appid', async (req, reply)
 });
 
 /** 웹이 처음에 한 번 받는 설정: 이미지를 끈 게임 목록 (퍼블리셔 요청 대응 — STEAM_COMPLIANCE C7) */
-app.get('/api/config', async () => ({ blockedImageAppids: await loadBlockedImages(), publicMode: env.publicMode }));
+app.get('/api/config', async () => ({
+  blockedImageAppids: await loadBlockedImages(),
+  publicMode: env.publicMode,
+  // 개인정보처리방침에 필요한 운영자 연락처·서버 위치 (STEAM_COMPLIANCE P5)
+  contactEmail: env.contactEmail ?? null,
+  serverRegion: env.serverRegion ?? null,
+}));
 
 // ── 로그인 ─────────────────────────────────────────────────────
 
@@ -151,6 +188,7 @@ app.get<{ Querystring: { user?: string; refresh?: string } }>('/api/library', as
     if (err instanceof ProfileNotFoundError) return reply.code(404).send({ error: 'not-found' });
     if (err instanceof MissingKeyError) return reply.code(503).send({ error: 'no-key' });
     if (err instanceof QuotaError) return reply.code(503).send({ error: 'quota' });
+    if (err instanceof UserQuotaError) return reply.code(429).send({ error: 'user-quota' });
     req.log.error(err);
     return reply.code(502).send({ error: 'steam-failed' });
   }
@@ -164,6 +202,32 @@ app.delete<{ Querystring: { user?: string } }>('/api/library', async (req, reply
   return { ok: true };
 });
 
+// ── 웹 화면 ───────────────────────────────────────────────────
+// 빌드된 웹(apps/web/dist)이 있으면 같은 서버·같은 주소에서 내보낸다. 개발 중에는 Vite가 대신한다
+const webIndex = path.join(env.webDist, 'index.html');
+if (existsSync(webIndex)) {
+  await app.register(fastifyStatic, {
+    root: env.webDist,
+    wildcard: false,
+    index: false,
+    setHeaders: (res, file) => {
+      // 파일 이름에 해시가 붙은 빌드 결과물은 오래 캐시, index.html은 매번 확인
+      res.header('cache-control', file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache');
+    },
+  });
+  app.get('/*', async (req, reply) => {
+    // 없는 API 주소는 화면이 아니라 404
+    if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'not-found' });
+    const file = path.join(env.webDist, path.normalize(req.url.split('?')[0]!));
+    if (file.startsWith(env.webDist) && existsSync(file) && !file.endsWith(path.sep) && path.extname(file)) {
+      return reply.sendFile(path.relative(env.webDist, file));
+    }
+    // 화면 주소는 모두 index.html (한 페이지 앱)
+    return reply.header('cache-control', 'no-cache').sendFile('index.html');
+  });
+}
+app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'not-found' }));
+
 // 오래된 라이브러리 캐시는 시작할 때와 매시간 지운다
 const purge = () =>
   purgeLibraries()
@@ -172,9 +236,13 @@ const purge = () =>
 void purge();
 setInterval(purge, 60 * 60 * 1000).unref();
 
+// 인기 게임 상점 정보를 한가할 때 미리 채운다
+startPrewarm((err) => app.log.warn(`인기 게임 목록을 받지 못함: ${err instanceof Error ? err.message : 'unknown'}`));
+
 try {
   await app.listen({ port: env.port, host: env.host });
   app.log.info(`Steam API 키: ${env.steamApiKey ? '있음' : '없음 (상점 정보만 동작)'}`);
+  app.log.info(existsSync(webIndex) ? `웹 화면도 함께 제공: ${env.webDist}` : '웹 빌드 없음: API만 제공 (개발 중이면 Vite가 웹을 띄운다)');
   app.log.info(env.publicMode ? '공개 모드: 로그인한 본인 계정만 조회' : '개발 모드: 로그인 없으면 STEAM_TEST_USER 사용');
   if (devSecret) app.log.warn('SESSION_SECRET 없음: 개발용 임시 키 사용 (서버를 재시작하면 다시 로그인해야 한다)');
 } catch (err) {

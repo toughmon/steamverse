@@ -9,13 +9,15 @@ interface Props {
   onSettings: (patch: Partial<Settings>) => void;
   /** 시연 모드에서는 이미지가 항상 꺼져 있다 */
   demo: boolean;
+  /** 운영자 연락처·서버 위치 (서버 설정 CONTACT_EMAIL·SERVER_REGION) */
+  operator: { contactEmail: string | null; serverRegion: string | null };
 }
 
 /**
  * 정보 패널: 비제휴 고지, 데이터 출처, 개인정보 처리 요약, 이미지 설정, 내 데이터 지우기.
  * (STEAM_COMPLIANCE T6·P5·P6·P8·C4·C7) 고지 문구는 packages/shared/src/legal.ts 하나에서 온다.
  */
-export function About({ onClose, settings, onSettings, demo }: Props) {
+export function About({ onClose, settings, onSettings, demo, operator }: Props) {
   const [erase, setErase] = useState<'idle' | 'confirm' | 'busy' | 'failed'>('idle');
 
   useEffect(() => {
@@ -82,11 +84,31 @@ export function About({ onClose, settings, onSettings, demo }: Props) {
             <li>Steam 공개 프로필 정보만 씁니다. 비공개로 설정된 정보는 받지 않고, 다른 방법으로 알아내지도 않습니다.</li>
             <li>친구 정보는 닉네임, 친구가 된 날, 나와 같이 가진 게임의 플레이 시간만 받고, 이 화면에서만 보여 줍니다.</li>
             <li>로그인은 Steam 로그인으로만 합니다. 비밀번호는 Steam 페이지에만 입력되고, 이 서비스는 SteamID만 받습니다.</li>
-            <li>받은 정보는 서비스 서버 캐시에 저장되고, 20분이 지나거나 로그아웃하면 지워집니다. 누구에게도 제공하지 않습니다.</li>
+            <li>
+              받은 정보는 서비스 서버{operator.serverRegion ? `(${operator.serverRegion})` : ''} 캐시에 저장되고, 20분이 지나거나 로그아웃하면 지워집니다. 누구에게도
+              제공하지 않습니다.
+            </li>
             <li>로그인 유지에 쿠키 하나(sv_session, 30일)를 쓰며, 광고·추적에는 쓰지 않습니다.</li>
             <li>탐사 기록과 설정은 이 브라우저에만 저장됩니다.</li>
             <li>아래 버튼으로 언제든 모두 지울 수 있습니다.</li>
+            <li>
+              Steam 친구로서 이 서비스에 정보가 표시된 분은 수집 출처·목적을 묻거나 처리 중단을 요청할 수 있습니다
+              {operator.contactEmail ? ': ' : '.'}
+              {operator.contactEmail && (
+                <a href={`mailto:${operator.contactEmail}`} className="text-sky-200/80 hover:text-sky-100">
+                  {operator.contactEmail}
+                </a>
+              )}
+            </li>
           </ul>
+          {operator.contactEmail && (
+            <p className="mt-3 text-[12px] text-white/50">
+              문의 ·{' '}
+              <a href={`mailto:${operator.contactEmail}`} className="text-sky-200/80 hover:text-sky-100">
+                {operator.contactEmail}
+              </a>
+            </p>
+          )}
         </section>
 
         <section className="mt-6">

@@ -10,7 +10,8 @@
     "build": "npm run build -w @steamverse/web",
     "typecheck": "npm run typecheck -w @steamverse/web && npm run typecheck -w @steamverse/server",
     "dev:web": "npm run dev -w @steamverse/web",
-    "dev:api": "npm run dev -w @steamverse/server"
+    "dev:api": "npm run dev -w @steamverse/server",
+    "start": "npm run start -w @steamverse/server"
   },
   "devDependencies": {
     "concurrently": "^10.0.7"

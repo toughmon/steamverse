@@ -90,6 +90,8 @@ export interface CatalogStatus {
   ready: number;
   pending: number;
   failed: number;
+  /** 아직 못 받은 게임이 다 채워지기까지 예상 시간(초). 상점 요청 줄은 모든 이용자가 같이 쓴다 */
+  etaSeconds?: number;
 }
 
 export interface CatalogResponse {

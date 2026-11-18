@@ -32,5 +32,15 @@ export const env = {
   sessionSecret: process.env.SESSION_SECRET?.trim() || undefined,
   port: Number(process.env.PORT ?? 8787),
   host: process.env.HOST ?? '127.0.0.1',
-  cacheDir: path.join(here, '..', '.cache'),
+  /** 캐시 폴더. 배포에서는 영구 디스크(볼륨)를 가리키게 한다 */
+  cacheDir: process.env.CACHE_DIR?.trim() || path.join(here, '..', '.cache'),
+  /** 빌드한 웹 파일 폴더. 있으면 서버가 웹 화면도 같이 내보낸다 (같은 주소에서 / 와 /api) */
+  webDist: process.env.WEB_DIST?.trim() || path.join(ROOT, 'apps', 'web', 'dist'),
+  /** 리버스 프록시(HTTPS 종료) 뒤에서 돌 때 1 — X-Forwarded-* 를 믿는다 */
+  trustProxy: process.env.TRUST_PROXY === '1',
+  /** 운영자 연락처·서버 위치. 정보 패널과 개인정보처리방침에 표시 (STEAM_COMPLIANCE P5) */
+  contactEmail: process.env.CONTACT_EMAIL?.trim() || undefined,
+  serverRegion: process.env.SERVER_REGION?.trim() || undefined,
+  /** 한 사람이 하루에 새로 동기화할 수 있는 횟수. 키 하나의 하루 10만 회를 이용자들이 나눠 쓰므로 (L1) */
+  userDailySyncs: Number(process.env.USER_DAILY_SYNCS ?? 10),
 };

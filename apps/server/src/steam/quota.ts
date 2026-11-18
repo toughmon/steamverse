@@ -1,4 +1,5 @@
 import { cacheGet, cacheSet } from '../lib/cache';
+import { env } from '../env';
 
 /**
  * Steam Web API 하루 호출 수. 약관상 키당 하루 10만 회 (STEAM_COMPLIANCE L1).
@@ -72,4 +73,35 @@ export async function usage(): Promise<{ day: string; calls: number; limit: numb
   await load();
   rollover();
   return { day, calls: count, limit: DAILY_LIMIT };
+}
+
+// ── 이용자별 하루 동기화 횟수 ──────────────────────────────────
+// 동기화 한 번이 Web API를 최대 약 150회 부른다. 한 사람이 하루 한도를 다 쓰지 못하게 나눈다 (L1)
+
+export class UserQuotaError extends Error {
+  constructor() {
+    super('이 계정의 오늘 동기화 횟수를 다 썼다');
+  }
+}
+
+let userDay = today();
+const userSyncs = new Map<string, number>();
+
+function userRollover() {
+  const d = today();
+  if (d === userDay) return;
+  userDay = d;
+  userSyncs.clear();
+}
+
+/** 이 계정이 오늘 새 동기화를 더 할 수 있는지 */
+export function assertUserQuota(steamid: string): void {
+  userRollover();
+  if ((userSyncs.get(steamid) ?? 0) >= env.userDailySyncs) throw new UserQuotaError();
+}
+
+/** 새 동기화를 시작할 때 */
+export function countUserSync(steamid: string): void {
+  userRollover();
+  userSyncs.set(steamid, (userSyncs.get(steamid) ?? 0) + 1);
 }

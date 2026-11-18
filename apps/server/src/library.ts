@@ -1,6 +1,6 @@
 import type { FriendRecord, GameRecord, LibraryData } from '@steamverse/shared';
 import { cacheDelete, cacheGet, cachePurge, cacheSet } from './lib/cache';
-import { assertQuota } from './steam/quota';
+import { assertQuota, assertUserQuota, countUserSync } from './steam/quota';
 import { getAchievements, getFriends, getLevel, getOwnedGames, getPlayers, resolveVanity } from './steam/webapi';
 
 /** 플레이 기록은 자주 바뀌니 짧게 */
@@ -115,11 +115,13 @@ export async function getLibrary(steamid: string, refresh = false): Promise<Libr
     // 한도에 가까우면 새로 받지 않는다. 지난 캐시가 남아 있으면 그거라도 준다
     try {
       await assertQuota();
+      assertUserQuota(steamid);
     } catch (err) {
       const stale = await cacheGet<LibraryResponse>('library', steamid, LIBRARY_KEEP_MS);
       if (stale) return stale;
       throw err;
     }
+    countUserSync(steamid);
     p = build(steamid)
       .then(async (r) => {
         await cacheSet('library', steamid, r);

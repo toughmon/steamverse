@@ -67,9 +67,15 @@ const UNAVAILABLE_SHORT: Record<Extract<AccountState, { phase: 'unavailable' }>[
   'no-user': '계정 없음',
   'not-found': '계정을 찾지 못함',
   quota: '오늘 호출 한도 근접',
+  'user-quota': '오늘 동기화 횟수 소진',
   offline: '서버 연결 안 됨',
   'steam-failed': 'Steam 응답 실패',
 };
+
+/** 남은 시간: 1분 미만은 초, 그 이상은 분 (많은 이용자가 줄을 같이 쓰므로 최대 예상치) */
+function formatEta(seconds: number): string {
+  return seconds < 60 ? `약 ${seconds}초` : `최대 약 ${Math.ceil(seconds / 60)}분`;
+}
 
 const UNAVAILABLE_TEXT: Record<Extract<AccountState, { phase: 'unavailable' }>['reason'], string> = {
   login: 'Steam으로 로그인하면 내 라이브러리를 불러옵니다',
@@ -77,6 +83,7 @@ const UNAVAILABLE_TEXT: Record<Extract<AccountState, { phase: 'unavailable' }>['
   'no-user': '.env에 STEAM_TEST_USER가 없습니다',
   'not-found': 'Steam 계정을 찾지 못했습니다',
   quota: '오늘 Steam Web API 호출 한도에 가까워 새로 받지 않았습니다',
+  'user-quota': '이 계정은 오늘 새로 동기화할 수 있는 횟수를 다 썼습니다. 내일 다시 받아 옵니다',
   offline: 'API 서버에 연결하지 못했습니다',
   'steam-failed': 'Steam에서 정보를 받지 못했습니다',
 };
@@ -116,8 +123,9 @@ function SourceSwitch({
     status = 'LOADING';
   } else if (catalog.phase === 'syncing') {
     dot = 'bg-sky-300 animate-pulse';
-    status = `STORE SYNC ${catalog.status.ready}/${catalog.status.total}`;
-    title = 'Steam 상점 정보를 받는 중 (처음 한 번은 게임 수에 따라 몇 분 걸립니다)';
+    const eta = catalog.status.etaSeconds ?? 0;
+    status = `STORE SYNC ${catalog.status.ready}/${catalog.status.total}${eta > 0 ? ` · ${formatEta(eta)}` : ''}`;
+    title = 'Steam 상점 정보를 받는 중입니다. 많이 한 게임부터 채워지며, 한 번 받은 정보는 모든 이용자가 같이 씁니다';
   } else if (catalog.phase === 'offline') {
     dot = 'bg-amber-300';
     status = 'OFFLINE';
@@ -174,6 +182,7 @@ export default function App() {
   const [settings, updateSettings] = useSettings();
   const [aboutOpen, setAboutOpen] = useState(false);
   const [blocked, setBlocked] = useState<number[]>([]);
+  const [operator, setOperator] = useState<{ contactEmail: string | null; serverRegion: string | null }>({ contactEmail: null, serverRegion: null });
   const demo = source === 'demo';
   const { me, loginError, dismissLoginError, logout } = useSession(demo);
 
@@ -182,7 +191,11 @@ export default function App() {
     if (demo) return;
     fetch('/api/config')
       .then((r) => (r.ok ? r.json() : null))
-      .then((b: { blockedImageAppids?: number[] } | null) => b?.blockedImageAppids && setBlocked(b.blockedImageAppids))
+      .then((b: { blockedImageAppids?: number[]; contactEmail?: string | null; serverRegion?: string | null } | null) => {
+        if (!b) return;
+        if (b.blockedImageAppids) setBlocked(b.blockedImageAppids);
+        setOperator({ contactEmail: b.contactEmail ?? null, serverRegion: b.serverRegion ?? null });
+      })
       .catch(() => undefined);
   }, [demo]);
 
@@ -258,6 +271,15 @@ export default function App() {
             </div>
           </div>
         </div>
+        {/* 상점 정보 받는 중: 헤더 아래 얇은 진행 막대 */}
+        {catalog.phase === 'syncing' && catalog.status.total > 0 && (
+          <div className="absolute inset-x-0 -bottom-px h-[2px] bg-white/[0.04]" aria-hidden>
+            <div
+              className="h-full bg-gradient-to-r from-sky-300/70 to-violet-300/70 transition-[width] duration-700"
+              style={{ width: `${Math.round((catalog.status.ready / catalog.status.total) * 100)}%` }}
+            />
+          </div>
+        )}
       </header>
 
       {loginError && (
@@ -268,7 +290,7 @@ export default function App() {
           </button>
         </div>
       )}
-      {aboutOpen && <About onClose={() => setAboutOpen(false)} settings={settings} onSettings={updateSettings} demo={demo} />}
+      {aboutOpen && <About onClose={() => setAboutOpen(false)} settings={settings} onSettings={updateSettings} demo={demo} operator={operator} />}
 
       <main key={imageKey} className="relative min-h-0 flex-1">
         {demo && (
