@@ -46,6 +46,11 @@ interface Props {
   graph: OntologyGraph;
   /** 탐사 기록을 계정별로 따로 저장하기 위한 키 */
   playerId: string;
+  /**
+   * 행성을 게임 표지로 그릴지. 표지를 변형(도트화)하므로 개인용 옵션이고 기본은 꺼짐.
+   * 끄면 행성은 코드로 만든 무늬로만 그리고, 원본 표지는 도킹 패널에서만 보여 준다. (STEAM_COMPLIANCE C3·C4)
+   */
+  coverArt: boolean;
   onOpenInExplorer: (id: string) => void;
 }
 
@@ -111,7 +116,7 @@ function saveVisited(key: string, visited: Set<string>) {
 
 type Toast = { key: number; title: string; name: string; sub: string; color: string };
 
-export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
+export function VoyageView({ graph, playerId, coverArt, onOpenInExplorer }: Props) {
   const world = useMemo(() => buildWorld(graph), [graph]);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -200,12 +205,14 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
     for (const p of world.planets) {
       if (p.backlog) fogSprites.current.set(p.id, fogSprite(p.r, p.seed));
       sprites.set(p.id, planetSprite(p.r, p.color, p.seed));
+      const src = coverArt ? steamImage(p.appid, 'header') : undefined;
+      if (!src) continue;
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         if (alive) sprites.set(p.id, planetSprite(p.r, p.color, p.seed, img));
       };
-      img.src = steamImage(p.appid, 'header');
+      img.src = src;
     }
     // 데이터가 바뀌어 지금 위치가 허공이 되었으면 시작 위치로
     const s = shipRef.current;
@@ -216,7 +223,7 @@ export function VoyageView({ graph, playerId, onOpenInExplorer }: Props) {
     return () => {
       alive = false;
     };
-  }, [world]);
+  }, [world, coverArt]);
 
   useEffect(() => {
     dockedRef.current = dockedId;

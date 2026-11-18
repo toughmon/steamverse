@@ -21,6 +21,7 @@ import {
   type RelationId,
 } from '@steamverse/shared';
 import { NodeDetail } from '../components/NodeDetail';
+import { GameImage } from '../components/GameImage';
 import { SearchBox } from '../components/SearchBox';
 import { Toggle } from '../components/Toggle';
 import { formatHours } from '../lib/format';
@@ -375,18 +376,20 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
     for (const n of visible.nodes) {
       const prev = known.get(n.id);
       if (!prev) newcomers += 1;
-      const isGame = n.cls === 'Game';
+      // 이미지를 껐거나 차단된 게임은 다른 노드처럼 빛나는 점으로 (STEAM_COMPLIANCE C7)
+      const image = n.cls === 'Game' ? steamImage(n.game!.appid, 'header') : undefined;
+      const isImage = image !== undefined;
       const color = nodeColor(n);
       g.addNode(n.id, {
         x: prev?.x ?? (rand() - 0.5) * 200,
         y: prev?.y ?? (rand() - 0.5) * 200,
-        size: isGame ? nodeSize(n) : nodeSize(n) * GLOW_SCALE,
+        size: isImage ? nodeSize(n) : nodeSize(n) * GLOW_SCALE,
         color,
         label: n.label,
-        type: isGame ? 'image' : 'glow',
-        image: isGame ? steamImage(n.game!.appid, 'header') : undefined,
-        halo1: isGame ? undefined : premultiplied(color, 0.22),
-        halo2: isGame ? undefined : premultiplied(color, 0.08),
+        type: isImage ? 'image' : 'glow',
+        image,
+        halo1: isImage ? undefined : premultiplied(color, 0.22),
+        halo2: isImage ? undefined : premultiplied(color, 0.08),
         cls: n.cls,
       });
     }
@@ -718,9 +721,9 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
                     onClick={() => onSelect(n.id)}
                     className="group relative overflow-hidden rounded-xl text-left ring-1 ring-white/[0.08] transition hover:ring-white/25"
                   >
-                    <img
-                      src={steamImage(n.game!.appid, 'header')}
-                      alt=""
+                    <GameImage
+                      appid={n.game!.appid}
+                      label={n.label}
                       className="aspect-[460/215] w-full object-cover transition duration-500 group-hover:scale-[1.04]"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />

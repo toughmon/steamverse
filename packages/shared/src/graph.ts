@@ -22,6 +22,7 @@ export interface GameInfo {
   tags: string[];
   priceKrw?: number;
   sale?: { priceKrw: number; discountPercent: number };
+  tagSource?: 'store' | 'steamspy';
 }
 
 export interface OrgInfo {
@@ -128,7 +129,23 @@ export function registerSteamImages(appid: number, images: Partial<Record<SteamI
   imageOverrides.set(appid, { ...imageOverrides.get(appid), ...images });
 }
 
-export function steamImage(appid: number, kind: SteamImageKind = 'header'): string {
+/**
+ * 게임 이미지 표시 정책. 끄거나 차단한 게임이면 steamImage()가 undefined를 돌려주고
+ * 화면은 이미지 없는 대체 표시를 쓴다. (STEAM_COMPLIANCE C2·C7)
+ */
+const imagePolicy = { enabled: true, blocked: new Set<number>() };
+export function setImagePolicy(policy: { enabled?: boolean; blocked?: Iterable<number> }) {
+  if (policy.enabled !== undefined) imagePolicy.enabled = policy.enabled;
+  if (policy.blocked) imagePolicy.blocked = new Set(policy.blocked);
+}
+
+/** Steam 상점 페이지. 게임 이미지를 보여 주는 곳에는 이 링크를 둔다 (C5) */
+export function steamStoreUrl(appid: number): string {
+  return `https://store.steampowered.com/app/${appid}/`;
+}
+
+export function steamImage(appid: number, kind: SteamImageKind = 'header'): string | undefined {
+  if (!imagePolicy.enabled || imagePolicy.blocked.has(appid)) return undefined;
   const override = imageOverrides.get(appid)?.[kind];
   if (override) return override;
   const file = {
@@ -270,6 +287,7 @@ export function buildOntologyGraph(lib: LibraryData): OntologyGraph {
         tags: g.tags,
         priceKrw: g.priceKrw,
         sale: g.sale,
+        tagSource: g.tagSource,
       },
     });
     addEdge(meId, game.id, 'owns', hours);

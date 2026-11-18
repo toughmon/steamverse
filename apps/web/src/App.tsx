@@ -1,5 +1,8 @@
-import { Suspense, lazy, useMemo, useState } from 'react';
-import { buildOntologyGraph } from '@steamverse/shared';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { buildOntologyGraph, setImagePolicy } from '@steamverse/shared';
+import { About } from './components/About';
+import { SignInThroughSteam, useSession } from './components/Session';
+import { useSettings } from './lib/settings';
 import { readSavedSource, saveSource, useLibrary, type AccountState, type AccountWarning, type CatalogState, type Source } from './data/useLibrary';
 import { ExplorerView } from './views/ExplorerView';
 import { OntologyView } from './views/OntologyView';
@@ -57,10 +60,30 @@ const WARNING_TEXT: Record<AccountWarning, string> = {
   'friends-private': '친구 목록이 비공개라 친구를 받지 못했습니다',
   'achievements-private': '게임 세부 정보가 비공개라 업적을 받지 못했습니다',
 };
+/** 상태 표시줄에 바로 보이는 짧은 이유 (자세한 설명은 툴팁) */
+const UNAVAILABLE_SHORT: Record<Extract<AccountState, { phase: 'unavailable' }>['reason'], string> = {
+  login: '로그인 필요',
+  'no-key': '서버에 Steam API 키 없음',
+  'no-user': '계정 없음',
+  'not-found': '계정을 찾지 못함',
+  quota: '오늘 호출 한도 근접',
+  'user-quota': '오늘 동기화 횟수 소진',
+  offline: '서버 연결 안 됨',
+  'steam-failed': 'Steam 응답 실패',
+};
+
+/** 남은 시간: 1분 미만은 초, 그 이상은 분 (많은 이용자가 줄을 같이 쓰므로 최대 예상치) */
+function formatEta(seconds: number): string {
+  return seconds < 60 ? `약 ${seconds}초` : `최대 약 ${Math.ceil(seconds / 60)}분`;
+}
+
 const UNAVAILABLE_TEXT: Record<Extract<AccountState, { phase: 'unavailable' }>['reason'], string> = {
-  'no-key': '.env에 STEAM_API_KEY가 없습니다',
+  login: 'Steam으로 로그인하면 내 라이브러리를 불러옵니다',
+  'no-key': '서버의 .env에 STEAM_API_KEY가 없어 게임 목록을 받을 수 없습니다. 로그인은 되어 있습니다',
   'no-user': '.env에 STEAM_TEST_USER가 없습니다',
   'not-found': 'Steam 계정을 찾지 못했습니다',
+  quota: '오늘 Steam Web API 호출 한도에 가까워 새로 받지 않았습니다',
+  'user-quota': '이 계정은 오늘 새로 동기화할 수 있는 횟수를 다 썼습니다. 내일 다시 받아 옵니다',
   offline: 'API 서버에 연결하지 못했습니다',
   'steam-failed': 'Steam에서 정보를 받지 못했습니다',
 };
@@ -83,17 +106,26 @@ function SourceSwitch({
   let dot = 'bg-white/30';
   let status = '';
   let title = '';
-  if (account.phase === 'unavailable') {
+  if (account.phase === 'demo') {
+    dot = 'bg-violet-300';
+    status = 'DEMO · 샘플 데이터 · 이름 가림 · 이미지 끔';
+    title = '스크린샷·발표용 시연 모드입니다. 서버에 아무것도 묻지 않습니다';
+  } else if (account.phase === 'unavailable' && account.reason === 'login') {
     dot = 'bg-amber-300';
-    status = 'SAMPLE · 계정 연결 안 됨';
+    status = 'SAMPLE · 로그인 필요';
+    title = UNAVAILABLE_TEXT.login;
+  } else if (account.phase === 'unavailable') {
+    dot = 'bg-amber-300';
+    status = `SAMPLE · ${UNAVAILABLE_SHORT[account.reason]}`;
     title = UNAVAILABLE_TEXT[account.reason];
   } else if (account.phase === 'loading' || catalog.phase === 'connecting') {
     dot = 'bg-sky-300 animate-pulse';
     status = 'LOADING';
   } else if (catalog.phase === 'syncing') {
     dot = 'bg-sky-300 animate-pulse';
-    status = `STORE SYNC ${catalog.status.ready}/${catalog.status.total}`;
-    title = 'Steam 상점 정보를 받는 중 (처음 한 번은 게임 수에 따라 몇 분 걸립니다)';
+    const eta = catalog.status.etaSeconds ?? 0;
+    status = `STORE SYNC ${catalog.status.ready}/${catalog.status.total}${eta > 0 ? ` · ${formatEta(eta)}` : ''}`;
+    title = 'Steam 상점 정보를 받는 중입니다. 많이 한 게임부터 채워지며, 한 번 받은 정보는 모든 이용자가 같이 씁니다';
   } else if (catalog.phase === 'offline') {
     dot = 'bg-amber-300';
     status = 'OFFLINE';
@@ -113,10 +145,21 @@ function SourceSwitch({
         <button type="button" role="radio" aria-checked={source === 'sample'} className={seg(source === 'sample')} onClick={() => onChange('sample')}>
           {source === 'sample' && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}샘플
         </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={source === 'demo'}
+          className={seg(source === 'demo')}
+          onClick={() => onChange('demo')}
+          title="스크린샷·발표용: 샘플 데이터, 이름 가림, 게임 이미지 끔"
+        >
+          {source === 'demo' && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}시연
+        </button>
       </div>
       <span className="font-mono text-[9px] tracking-[0.14em] text-white/40" title={title || undefined}>
         {status}
       </span>
+      {source === 'steam' && account.phase === 'unavailable' && account.reason === 'login' && <SignInThroughSteam />}
       {warnings.length > 0 && (
         <span
           className="cursor-help rounded-full border border-amber-200/25 px-1.5 py-[2px] font-mono text-[9px] tracking-[0.1em] text-amber-200/80"
@@ -136,6 +179,31 @@ export default function App() {
     saveSource(s);
   };
   const { library, catalog, account } = useLibrary(source);
+  const [settings, updateSettings] = useSettings();
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [blocked, setBlocked] = useState<number[]>([]);
+  const [operator, setOperator] = useState<{ contactEmail: string | null; serverRegion: string | null }>({ contactEmail: null, serverRegion: null });
+  const demo = source === 'demo';
+  const { me, loginError, dismissLoginError, logout } = useSession(demo);
+
+  // 권리자 요청으로 이미지를 끈 게임 목록 (STEAM_COMPLIANCE C7). 서버가 없으면 빈 목록
+  useEffect(() => {
+    if (demo) return;
+    fetch('/api/config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { blockedImageAppids?: number[]; contactEmail?: string | null; serverRegion?: string | null } | null) => {
+        if (!b) return;
+        if (b.blockedImageAppids) setBlocked(b.blockedImageAppids);
+        setOperator({ contactEmail: b.contactEmail ?? null, serverRegion: b.serverRegion ?? null });
+      })
+      .catch(() => undefined);
+  }, [demo]);
+
+  // 이미지 정책은 렌더 전에 정한다. 바뀌면 아래 main을 다시 그려 모든 화면이 새 정책을 따르게 한다
+  const imagesOn = settings.images && !demo;
+  setImagePolicy({ enabled: imagesOn, blocked });
+  const imageKey = `${imagesOn}:${blocked.join(',')}`;
+
   const graph = useMemo(() => buildOntologyGraph(library), [library]);
   const [view, setView] = useState<View>('explorer');
   const [rawSelectedId, setSelectedId] = useState<string | null>(null);
@@ -178,19 +246,58 @@ export default function App() {
           <Kpi label="Backlog" value={formatNumber(stats.byStatus.backlog)} unit="개" sub={percent(stats.byStatus.backlog, stats.totalGames)} />
           <Kpi label="Last 2 weeks" value={formatNumber(stats.recentHours)} unit="시간" />
           <Kpi label="Friends" value={formatNumber(stats.friends)} unit="명" />
+          <button
+            onClick={() => setAboutOpen(true)}
+            className="grid size-7 place-items-center rounded-full border border-white/[0.1] font-mono text-[11px] text-white/50 transition hover:border-white/30 hover:text-white"
+            aria-label="정보 · 데이터 · 설정"
+            title="정보 · 데이터 · 설정"
+          >
+            i
+          </button>
           <div className="flex items-center gap-3 border-l border-white/[0.08] pl-6">
             <div className="rounded-full bg-gradient-to-br from-[#ff8fb1] via-[#b69cff] to-[#7aa2ff] p-[1.5px]">
               <div className="grid size-8 place-items-center rounded-full bg-[#0a0c16] text-[12px] font-semibold text-white">나</div>
             </div>
             <div className="leading-tight">
               <div className="text-[12.5px] font-medium text-white">{library.player.name}</div>
-              <div className="font-mono text-[10px] tracking-wider text-white/40">LV {library.player.level}</div>
+              <div className="font-mono text-[10px] tracking-wider text-white/40">
+                LV {library.player.level}
+                {me && source === 'steam' && (
+                  <button onClick={logout} className="ml-2 text-white/35 underline-offset-2 hover:text-white hover:underline">
+                    로그아웃
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
+        {/* 상점 정보 받는 중: 헤더 아래 얇은 진행 막대 */}
+        {catalog.phase === 'syncing' && catalog.status.total > 0 && (
+          <div className="absolute inset-x-0 -bottom-px h-[2px] bg-white/[0.04]" aria-hidden>
+            <div
+              className="h-full bg-gradient-to-r from-sky-300/70 to-violet-300/70 transition-[width] duration-700"
+              style={{ width: `${Math.round((catalog.status.ready / catalog.status.total) * 100)}%` }}
+            />
+          </div>
+        )}
       </header>
 
-      <main className="relative min-h-0 flex-1">
+      {loginError && (
+        <div className="fixed top-[72px] left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-amber-200/25 bg-[#1a1408]/95 px-4 py-2 text-[12px] text-amber-100/90">
+          {loginError}
+          <button onClick={dismissLoginError} className="text-amber-100/50 hover:text-white" aria-label="닫기">
+            ✕
+          </button>
+        </div>
+      )}
+      {aboutOpen && <About onClose={() => setAboutOpen(false)} settings={settings} onSettings={updateSettings} demo={demo} operator={operator} />}
+
+      <main key={imageKey} className="relative min-h-0 flex-1">
+        {demo && (
+          <div className="pointer-events-none absolute top-3 left-1/2 z-30 -translate-x-1/2 rounded-full border border-violet-300/30 bg-violet-500/15 px-3 py-1 font-mono text-[10px] tracking-[0.2em] text-violet-200/90">
+            DEMO
+          </div>
+        )}
         {view === 'explorer' && <ExplorerView graph={graph} selectedId={selectedId} onSelect={setSelectedId} />}
         {view === 'charts' && (
           <Suspense fallback={<div className="h-full bg-[#04050a]" />}>
@@ -208,7 +315,8 @@ export default function App() {
           <Suspense fallback={<div className="h-full bg-[#04050b]" />}>
             <VoyageView
               graph={graph}
-              playerId={source === 'sample' ? 'sample' : library.player.steamid}
+              playerId={source === 'steam' ? library.player.steamid : source}
+              coverArt={settings.voyageCoverArt && imagesOn}
               onOpenInExplorer={(id) => {
                 setSelectedId(id);
                 setView('explorer');

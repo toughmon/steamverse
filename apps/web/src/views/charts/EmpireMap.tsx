@@ -3,6 +3,7 @@ import { hierarchy, type HierarchyNode } from 'd3-hierarchy';
 import { voronoiTreemap, type Point } from 'd3-voronoi-treemap';
 import { steamImage, type OntologyGraph } from '@steamverse/shared';
 import { formatHours } from '../../lib/format';
+import { GameImage, gameTint } from '../../components/GameImage';
 import { ChartCard, INK, SERIES, TipRow, Tooltip, useSize } from './kit';
 
 const H = 480;
@@ -178,15 +179,23 @@ export function EmpireMap({ graph, onOpen }: { graph: OntologyGraph; onOpen: (id
                   onMouseEnter={() => setHover(l)}
                   onClick={() => l.data.id && onOpen(l.data.id)}
                 >
-                  <image
-                    href={steamImage(l.data.appid!, 'header')}
-                    x={x0}
-                    y={y0}
-                    width={Math.max(...xs) - x0}
-                    height={Math.max(...ys) - y0}
-                    preserveAspectRatio="xMidYMid slice"
-                    clipPath={`url(#em-c${i})`}
-                  />
+                  {(() => {
+                    const href = steamImage(l.data.appid!, 'header');
+                    // 이미지를 껐거나 차단된 게임은 게임별 색으로 칠한다 (STEAM_COMPLIANCE C7)
+                    return href ? (
+                      <image
+                        href={href}
+                        x={x0}
+                        y={y0}
+                        width={Math.max(...xs) - x0}
+                        height={Math.max(...ys) - y0}
+                        preserveAspectRatio="xMidYMid slice"
+                        clipPath={`url(#em-c${i})`}
+                      />
+                    ) : (
+                      <path d={pathOf(l.polygon!)} fill={gameTint(l.data.appid!, 40)} />
+                    );
+                  })()}
                   <path d={pathOf(l.polygon!)} fill="#05060c" fillOpacity={active ? 0 : hover ? 0.62 : 0.42} className="transition-[fill-opacity] duration-200" />
                 </g>
               );
@@ -227,7 +236,7 @@ export function EmpireMap({ graph, onOpen }: { graph: OntologyGraph; onOpen: (id
         )}
         {hover && layout && (
           <Tooltip x={mouse.x} y={mouse.y} width={W}>
-            <img src={steamImage(hover.data.appid!, 'capsule')} alt="" className="mb-2 h-[44px] w-[117px] rounded-md object-cover" />
+            <GameImage appid={hover.data.appid!} kind="capsule" fallback="none" className="mb-2 h-[44px] w-[117px] rounded-md object-cover" />
             <div className="mb-1.5 text-[12.5px] font-medium text-white">{hover.data.name}</div>
             <TipRow label="유통사" value={hover.data.pub ?? ''} />
             <TipRow label="개발사" value={hover.data.dev ?? ''} />

@@ -1,4 +1,4 @@
-import type { OntologyGraph } from '@steamverse/shared';
+import { LEGAL_NOTICE, type OntologyGraph } from '@steamverse/shared';
 import { formatNumber } from '../lib/format';
 import { EmpireMap } from './charts/EmpireMap';
 import { Fingerprint } from './charts/Fingerprint';
@@ -56,6 +56,12 @@ export function ChartView({ graph, onOpenInExplorer }: Props) {
         <div id="r-iceberg" className="scroll-mt-6">
           <Iceberg graph={graph} onOpen={onOpenInExplorer} />
         </div>
+
+        {/* 비제휴·출처 고지 (STEAM_COMPLIANCE T6·P8) */}
+        <footer className="mt-6 border-t border-white/[0.06] pt-5 text-[11px] leading-relaxed text-white/35">
+          <p>{LEGAL_NOTICE.ko}</p>
+          <p className="mt-1.5 text-white/25">{LEGAL_NOTICE.en}</p>
+        </footer>
       </div>
     </div>
   );

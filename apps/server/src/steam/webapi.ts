@@ -1,6 +1,7 @@
 import { env } from '../env';
 import { UpstreamError, getJson } from '../lib/http';
 import { RateLimitedError, createThrottle } from '../lib/throttle';
+import { countCall } from './quota';
 
 /**
  * Steam Web API (키 필요). 공식 한도는 하루 10만 회라 넉넉하지만,
@@ -16,10 +17,15 @@ export class MissingKeyError extends Error {
   }
 }
 
+/**
+ * 키를 쿼리에 붙이는 곳은 여기 한 곳뿐이다. 키가 든 URL 문자열은 이 함수 밖으로 내보내지 않는다.
+ * (getJson은 오류에 호스트·상태만 담는다 — STEAM_COMPLIANCE K2)
+ */
 function call<T>(path: string, params: Record<string, string | number | boolean>): Promise<T> {
   if (!env.steamApiKey) return Promise.reject(new MissingKeyError());
   const qs = new URLSearchParams({ key: env.steamApiKey, ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])) });
   return webapiQueue.schedule(async () => {
+    await countCall((used) => console.warn(`[webapi] 오늘 호출 ${used}회 — 하루 한도의 80%를 넘었다`));
     try {
       return await getJson<T>(`${BASE}/${path}/?${qs}`);
     } catch (err) {

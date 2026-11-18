@@ -6,12 +6,13 @@ import {
   RELATION_READING,
   nodeTurtle,
   otherEnd,
-  steamImage,
+  steamStoreUrl,
   type OntNode,
   type OntologyGraph,
   type RelationId,
 } from '@steamverse/shared';
 import { formatDate, formatHours, formatNumber, percent } from '../lib/format';
+import { GameImage } from './GameImage';
 
 interface Props {
   graph: OntologyGraph;
@@ -105,9 +106,10 @@ function NeighborGame({ node, weight, rel, onSelect }: { node: OntNode; weight?:
       className="group flex w-full items-center gap-3 rounded-lg px-1.5 py-1.5 text-left transition hover:bg-white/[0.045]"
     >
       <span className="relative shrink-0">
-        <img
-          src={steamImage(node.game!.appid, 'capsule')}
-          alt=""
+        <GameImage
+          appid={node.game!.appid}
+          kind="capsule"
+          label={node.label}
           loading="lazy"
           className="h-[30px] w-[80px] rounded-md object-cover opacity-85 ring-1 ring-white/10 transition group-hover:opacity-100"
         />
@@ -177,7 +179,7 @@ export function NodeDetail({ graph, nodeId, onSelect, compact, actions }: Props)
       {/* ── 머리 ── */}
       {game ? (
         <div className="relative -mx-4 -mt-4 overflow-hidden rounded-t-[inherit]">
-          <img src={steamImage(game.appid, 'header')} alt="" className="aspect-[460/215] w-full object-cover" />
+          <GameImage appid={game.appid} label={node.label} className="aspect-[460/215] w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#0a0c16] via-[#0a0c16]/55 to-transparent" />
           <div className="absolute inset-x-4 bottom-3">
             <div className="flex items-center gap-3">
@@ -190,6 +192,15 @@ export function NodeDetail({ graph, nodeId, onSelect, compact, actions }: Props)
             </div>
             <h2 className="mt-1.5 text-[19px] leading-tight font-semibold tracking-tight text-white drop-shadow">{node.label}</h2>
           </div>
+          {/* 게임 이미지의 출처인 상점 페이지. nofollow를 붙이지 않는다 (STEAM_COMPLIANCE C5·T7) */}
+          <a
+            href={steamStoreUrl(game.appid)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute top-2.5 right-2.5 rounded-full bg-black/55 px-2.5 py-1 text-[10.5px] text-white/80 backdrop-blur transition hover:bg-black/75 hover:text-white"
+          >
+            Steam 상점에서 보기 ↗
+          </a>
         </div>
       ) : (
         <div>
@@ -267,6 +278,14 @@ export function NodeDetail({ graph, nodeId, onSelect, compact, actions }: Props)
           <h3 className="mb-2 flex items-center gap-2">
             <span className="eyebrow">{g.title}</span>
             <span className="num font-mono text-[10px] text-white/25">{g.items.length}</span>
+            {g.rel === 'hasTag' && game?.tagSource === 'steamspy' && (
+              <span
+                className="rounded-full border border-amber-200/20 px-1.5 py-px font-mono text-[8.5px] tracking-[0.12em] text-amber-200/70 uppercase"
+                title="Steam 상점 태그가 없어 SteamSpy 표본 추정치를 썼습니다"
+              >
+                SteamSpy 추정
+              </span>
+            )}
             {RELATIONS[g.rel].inferred && (
               <span className="rounded-full border border-sky-300/20 px-1.5 py-px font-mono text-[8.5px] tracking-[0.12em] text-sky-200/70 uppercase">
                 inferred

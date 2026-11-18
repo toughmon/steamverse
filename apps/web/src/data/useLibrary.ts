@@ -7,9 +7,10 @@ import { sampleLibrary } from './sampleLibrary';
  * 라이브러리 데이터 출처.
  * - steam: 서버가 Steam Web API로 받은 내 플레이 기록(보유 게임·시간·업적·친구)
  * - sample: 프로토타입용 샘플
- * 어느 쪽이든 게임 정보(회사·장르·태그·출시년도·가격)는 상점 카탈로그로 덮어쓴다.
+ * - demo: 스크린샷·발표용 시연 모드. 샘플만 쓰고 이름을 가리며 게임 이미지를 끈다 (STEAM_COMPLIANCE C2·P2)
+ * steam·sample은 게임 정보(회사·장르·태그·출시년도·가격)를 상점 카탈로그로 덮어쓴다. demo는 상점에 묻지 않는다.
  */
-export type Source = 'steam' | 'sample';
+export type Source = 'steam' | 'sample' | 'demo';
 
 export type CatalogState =
   | { phase: 'connecting' }
@@ -20,10 +21,11 @@ export type CatalogState =
 export type AccountWarning = 'games-private' | 'friends-private' | 'achievements-private';
 export type AccountState =
   | { phase: 'sample' }
+  | { phase: 'demo' }
   | { phase: 'loading' }
   | { phase: 'ok'; warnings: AccountWarning[] }
   /** 계정을 못 불러 샘플을 대신 보여 주는 중 */
-  | { phase: 'unavailable'; reason: 'no-key' | 'no-user' | 'not-found' | 'offline' | 'steam-failed' };
+  | { phase: 'unavailable'; reason: 'login' | 'no-key' | 'no-user' | 'not-found' | 'quota' | 'user-quota' | 'offline' | 'steam-failed' };
 
 /** 게임당 태그 수. 너무 많으면 태그 노드가 폭증해 그래프·은하가 흐려진다 */
 const TAGS_PER_GAME = 6;
@@ -51,14 +53,25 @@ export function mergeCatalog(base: LibraryData, apps: StoreApp[]): LibraryData {
         releaseYear: a.releaseYear ?? g.releaseYear,
         priceKrw: a.isFree ? 0 : (a.price?.initial ?? g.priceKrw),
         sale: a.price && a.price.discountPercent > 0 ? { priceKrw: a.price.final, discountPercent: a.price.discountPercent } : undefined,
+        tagSource: !a.tags.length ? g.tagSource : a.sources.includes('steamspy') ? 'steamspy' : 'store',
       };
     }),
   };
 }
 
+/** 시연 모드: 플레이어·친구 이름과 SteamID를 가린다 */
+export function anonymize(lib: LibraryData): LibraryData {
+  return {
+    ...lib,
+    player: { ...lib.player, steamid: 'demo', name: '플레이어' },
+    friends: lib.friends.map((f, i) => ({ ...f, steamid: `demo-friend-${i + 1}`, name: `친구 ${String.fromCharCode(65 + (i % 26))}${i >= 26 ? Math.floor(i / 26) : ''}` })),
+  };
+}
+
 export function readSavedSource(): Source {
   try {
-    return localStorage.getItem(SOURCE_KEY) === 'sample' ? 'sample' : 'steam';
+    const v = localStorage.getItem(SOURCE_KEY);
+    return v === 'sample' || v === 'demo' ? v : 'steam';
   } catch {
     return 'steam';
   }
@@ -77,7 +90,7 @@ async function loadAccount(): Promise<{ library: LibraryData; account: AccountSt
     const res = await fetch('/api/library');
     const body = (await res.json().catch(() => ({}))) as { library?: LibraryData; warnings?: AccountWarning[]; error?: string };
     if (res.ok && body.library) return { library: body.library, account: { phase: 'ok', warnings: body.warnings ?? [] } };
-    const reason = (['no-key', 'no-user', 'not-found'] as const).find((r) => r === body.error) ?? 'steam-failed';
+    const reason = (['login', 'no-key', 'no-user', 'not-found', 'quota', 'user-quota'] as const).find((r) => r === body.error) ?? 'steam-failed';
     return { library: sampleLibrary, account: { phase: 'unavailable', reason } };
   } catch {
     return { library: sampleLibrary, account: { phase: 'unavailable', reason: 'offline' } };
@@ -87,7 +100,7 @@ async function loadAccount(): Promise<{ library: LibraryData; account: AccountSt
 export function useLibrary(source: Source): { library: LibraryData; catalog: CatalogState; account: AccountState } {
   const [library, setLibrary] = useState<LibraryData>(sampleLibrary);
   const [catalog, setCatalog] = useState<CatalogState>({ phase: 'connecting' });
-  const [account, setAccount] = useState<AccountState>(source === 'steam' ? { phase: 'loading' } : { phase: 'sample' });
+  const [account, setAccount] = useState<AccountState>(source === 'steam' ? { phase: 'loading' } : { phase: source });
 
   useEffect(() => {
     let timer: number | undefined;
@@ -103,7 +116,8 @@ export function useLibrary(source: Source): { library: LibraryData; catalog: Cat
         return;
       }
       try {
-        const appids = base.games.map((g) => g.appid).join(',');
+        // 많이 한 게임부터 받는다: 화면에서 크게 보이는 게임이 먼저 채워진다
+        const appids = [...base.games].sort((a, b) => b.playtimeMinutes - a.playtimeMinutes).map((g) => g.appid).join(',');
         const res = await fetch(`/api/catalog?appids=${appids}`);
         if (!res.ok) throw new Error(String(res.status));
         const body = (await res.json()) as CatalogResponse;
@@ -126,6 +140,13 @@ export function useLibrary(source: Source): { library: LibraryData; catalog: Cat
     };
 
     void (async () => {
+      if (source === 'demo') {
+        // 시연 모드는 서버에 아무것도 묻지 않는다
+        setAccount({ phase: 'demo' });
+        setLibrary(anonymize(sampleLibrary));
+        setCatalog({ phase: 'live', status: { total: 0, ready: 0, pending: 0, failed: 0 } });
+        return;
+      }
       if (source === 'steam') {
         setAccount({ phase: 'loading' });
         const r = await loadAccount();

@@ -12,7 +12,7 @@ import {
   RELATION_ORDER,
   type PlayStatus,
 } from './ontology';
-import type { OntEdge, OntologyGraph } from './graph';
+import type { OntologyGraph } from './graph';
 
 const PREFIXES = `@prefix sv: <${ONTOLOGY_NS}> .
 @prefix svd: <${DATA_NS}> .
@@ -86,15 +86,31 @@ export function vocabularyTurtle(): string {
   return out.join('\n');
 }
 
-function edgeTriple(e: OntEdge): string {
-  return `${nodeIri(e.source)} sv:${e.rel} ${nodeIri(e.target)} .`;
+/**
+ * 내보내기용 IRI. 친구(본인이 아닌 Player)는 SteamID가 IRI에 들어가지 않도록
+ * 그래프 안에서만 의미 있는 순번으로 바꾼다. (STEAM_COMPLIANCE P2)
+ */
+function exportIri(g: OntologyGraph): (nodeId: string) => string {
+  const friendIndex = new Map<string, number>();
+  for (const n of g.nodes) if (n.cls === 'Player' && !n.player?.isMe) friendIndex.set(n.id, friendIndex.size + 1);
+  return (id) => {
+    const i = friendIndex.get(id);
+    return i ? `svd:friend-${i}` : nodeIri(id);
+  };
 }
+
+const isFriend = (g: OntologyGraph, id: string) => {
+  const n = g.nodeById.get(id);
+  return n?.cls === 'Player' && !n.player?.isMe;
+};
 
 /** 한 노드를 중심으로 한 Turtle (주어 트리플 + 이 노드를 가리키는 트리플) */
 export function nodeTurtle(g: OntologyGraph, nodeId: string, maxIncoming = 12): string {
   const n = g.nodeById.get(nodeId);
   if (!n) return '';
-  const props: string[] = [`a sv:${n.cls}`, `rdfs:label ${lit(n.label)}`];
+  const iri = exportIri(g);
+  // 친구 닉네임은 내보내지 않는다
+  const props: string[] = [`a sv:${n.cls}`, ...(isFriend(g, nodeId) ? [] : [`rdfs:label ${lit(n.label)}`])];
   if (n.game) {
     props.push(`sv:appid ${n.game.appid}`);
     props.push(`sv:playtimeHours ${n.hours.toFixed(1)}`);
@@ -112,15 +128,15 @@ export function nodeTurtle(g: OntologyGraph, nodeId: string, maxIncoming = 12): 
   const incoming = edges.filter((e) => e.target === nodeId);
 
   const grouped = new Map<string, string[]>();
-  for (const e of outgoing) grouped.set(e.rel, [...(grouped.get(e.rel) ?? []), nodeIri(e.target)]);
+  for (const e of outgoing) grouped.set(e.rel, [...(grouped.get(e.rel) ?? []), iri(e.target)]);
   for (const [rel, objs] of grouped) props.push(`sv:${rel} ${objs.join(', ')}`);
 
-  const out = [PREFIXES, '', `${nodeIri(nodeId)}`];
+  const out = [PREFIXES, '', iri(nodeId)];
   props.forEach((p, i) => out.push(`    ${p} ${i === props.length - 1 ? '.' : ';'}`));
 
   if (incoming.length) {
     out.push('', `# 이 노드를 가리키는 관계 (${incoming.length}개${incoming.length > maxIncoming ? `, ${maxIncoming}개만 표시` : ''})`);
-    for (const e of incoming.slice(0, maxIncoming)) out.push(edgeTriple(e));
+    for (const e of incoming.slice(0, maxIncoming)) out.push(`${iri(e.source)} sv:${e.rel} ${iri(e.target)} .`);
   }
   return out.join('\n');
 }
