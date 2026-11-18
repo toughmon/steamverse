@@ -9,7 +9,7 @@ domain: docs
 
 > 기준: 2026-11-18, 커밋 `31cd4ea` (main)
 >
-> 기획은 [PLAN.md](PLAN.md), 데스크톱 앱 전환 계획은 [ELECTRON.md](ELECTRON.md), Steam 약관·저작권 규약은 [STEAM_COMPLIANCE.md](STEAM_COMPLIANCE.md)
+> 배포는 [DEPLOY.md](DEPLOY.md) · 기획은 [PLAN.md](PLAN.md), 데스크톱 앱 전환 계획은 [ELECTRON.md](ELECTRON.md), Steam 약관·저작권 규약은 [STEAM_COMPLIANCE.md](STEAM_COMPLIANCE.md)
 
 ---
 
@@ -223,10 +223,15 @@ D3(계산) + React SVG. 위에서 아래로 읽는 4장. 게임을 누르면 탐
 - [ ] 친구 60명·업적 80게임 상한: 큰 계정은 첫 로딩이 느리고 일부가 빠짐
 - [ ] 첫 상점 동기화가 게임 수 × 약 1.6초 이상 걸림 (게임 300개면 8분 이상)
 - [ ] 탐사 기록·데이터 출처 선택이 브라우저 localStorage에만 있음
-- [ ] `npm audit` high 5건
+- [x] `npm audit` high 5건 — 확인 결과 Vite 안의 picomatch 하나, 운영 서버와 무관·수정판 없음 → [DEPLOY.md](DEPLOY.md) §6
 - [ ] esbuild·fsevents install 스크립트 미승인 (`npm install-scripts approve esbuild`)
 - [ ] Electron 데스크톱 앱 전환 → [ELECTRON.md](ELECTRON.md)
 - [x] 규약 위반 소지 개선 1~11 (로그 마스킹, 캐시 정리, 상점 링크, 고지, SteamSpy 표시, 호출량 제한, 탐사 표지 기본 끔, 이미지 끄기·차단, 시연 모드, RDF 친구 익명화, 내 데이터 지우기) → [COMPLIANCE_PLAN.md](COMPLIANCE_PLAN.md)
 - [x] Steam 로그인(OpenID) + 공개 모드(본인 계정만 조회) — `apps/server/src/auth.ts`, `apps/web/src/components/Session.tsx`
+- [x] 배포 구성: 서버가 웹+API를 한 주소로, 보안 헤더, Dockerfile, `CACHE_DIR`·`TRUST_PROXY` → [DEPLOY.md](DEPLOY.md)
+- [x] 상점 동기화: 많이 한 게임부터, 남은 시간·진행 막대, 인기 게임 100개 미리 채우기
+- [x] 이용자별 하루 동기화 횟수 제한
+- [ ] API 키를 서비스 전용 계정 키로 교체 (DEPLOY.md §4)
+- [ ] 호스팅 결정·실제 배포
 - [ ] 제품명 변경 (STEAM_COMPLIANCE T4)
 - [ ] [PRIVACY.md](PRIVACY.md) 초안을 배포 형태에 맞게 완성
