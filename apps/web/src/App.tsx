@@ -12,9 +12,11 @@ import { formatNumber, percent } from './lib/format';
 const VoyageView = lazy(() => import('./views/VoyageView').then((m) => ({ default: m.VoyageView })));
 const ChartView = lazy(() => import('./views/ChartView').then((m) => ({ default: m.ChartView })));
 const SignalView = lazy(() => import('./views/SignalView').then((m) => ({ default: m.SignalView })));
+const AchievementsView = lazy(() => import('./views/AchievementsView').then((m) => ({ default: m.AchievementsView })));
+const Roulette = lazy(() => import('./components/Roulette').then((m) => ({ default: m.Roulette })));
 const ConstellationView = lazy(() => import('./views/ConstellationView').then((m) => ({ default: m.ConstellationView })));
 
-type View = 'explorer' | 'voyage' | 'charts' | 'signal' | 'constellation' | 'ontology';
+type View = 'explorer' | 'voyage' | 'charts' | 'signal' | 'constellation' | 'achievements' | 'ontology';
 
 const TABS: { id: View; index: string; label: string }[] = [
   { id: 'explorer', index: '01', label: '그래프 탐색기' },
@@ -22,7 +24,8 @@ const TABS: { id: View; index: string; label: string }[] = [
   { id: 'charts', index: '03', label: '차트' },
   { id: 'signal', index: '04', label: '시그널' },
   { id: 'constellation', index: '05', label: '성단' },
-  { id: 'ontology', index: '06', label: '온톨로지' },
+  { id: 'achievements', index: '06', label: '업적' },
+  { id: 'ontology', index: '07', label: '온톨로지' },
 ];
 
 function Logo() {
@@ -185,6 +188,7 @@ export default function App() {
   const { library, catalog, account } = useLibrary(source);
   const [settings, updateSettings] = useSettings();
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [rouletteOpen, setRouletteOpen] = useState(false);
   const [blocked, setBlocked] = useState<number[]>([]);
   const [operator, setOperator] = useState<{ contactEmail: string | null; serverRegion: string | null }>({ contactEmail: null, serverRegion: null });
   const demo = source === 'demo';
@@ -256,6 +260,14 @@ export default function App() {
             <Kpi label="Friends" value={formatNumber(stats.friends)} unit="명" />
           </div>
           <button
+            onClick={() => setRouletteOpen(true)}
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/[0.1] px-2.5 py-1 text-[11.5px] text-white/65 transition hover:border-white/30 hover:text-white"
+            title="오늘 뭐 하지? 잠든 게임 중 하나를 골라 드려요"
+          >
+            <span aria-hidden>🎲</span>
+            <span className="hidden min-[1500px]:inline">오늘 뭐 하지</span>
+          </button>
+          <button
             onClick={() => setAboutOpen(true)}
             className="grid size-7 place-items-center rounded-full border border-white/[0.1] font-mono text-[11px] text-white/50 transition hover:border-white/30 hover:text-white"
             aria-label="정보 · 데이터 · 설정"
@@ -299,6 +311,19 @@ export default function App() {
           </button>
         </div>
       )}
+      {rouletteOpen && (
+        <Suspense fallback={null}>
+          <Roulette
+            graph={graph}
+            onClose={() => setRouletteOpen(false)}
+            onOpen={(id) => {
+              setRouletteOpen(false);
+              setSelectedId(id);
+              setView('explorer');
+            }}
+          />
+        </Suspense>
+      )}
       {aboutOpen && <About onClose={() => setAboutOpen(false)} settings={settings} onSettings={updateSettings} demo={demo} operator={operator} />}
 
       <main key={imageKey} className="relative min-h-0 flex-1">
@@ -335,6 +360,17 @@ export default function App() {
             <ConstellationView
               graph={graph}
               onOpen={(id) => {
+                setSelectedId(id);
+                setView('explorer');
+              }}
+            />
+          </Suspense>
+        )}
+        {view === 'achievements' && (
+          <Suspense fallback={<div className="h-full bg-[#04050a]" />}>
+            <AchievementsView
+              graph={graph}
+              onOpenInExplorer={(id) => {
                 setSelectedId(id);
                 setView('explorer');
               }}

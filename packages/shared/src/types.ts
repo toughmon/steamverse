@@ -3,6 +3,18 @@
  * 프로토타입에서는 샘플 데이터가 이 형태를 채운다.
  */
 
+/** 해금한 업적 하나 (GetPlayerAchievements) */
+export interface AchievementUnlock {
+  /** 업적 API 이름 (게임 안에서 고유) — 전 세계 달성률과 맞출 때 쓴다 */
+  api: string;
+  /** 표시 이름 (한국어가 있으면 한국어) */
+  name?: string;
+  /** 해금 시각 (unix 초) */
+  t: number;
+  /** 샘플 데이터 전용: 지어낸 전 세계 달성률(%) — 실제 계정은 서버에서 받는다 */
+  samplePct?: number;
+}
+
 export type DeckCompat = 'verified' | 'playable' | 'unsupported' | 'unknown';
 
 export interface GameRecord {
@@ -22,6 +34,8 @@ export interface GameRecord {
   /** GetOwnedGames.rtime_last_played (ISO 날짜) */
   lastPlayed?: string;
   achievements?: { unlocked: number; total: number };
+  /** 해금한 업적과 시각. 활동 캘린더·희귀 업적에 쓴다 */
+  achievementLog?: AchievementUnlock[];
   deck: DeckCompat;
   /** 정가(원). 0 = 무료. 없으면 모름 */
   priceKrw?: number;
