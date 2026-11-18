@@ -11,14 +11,16 @@ import { formatNumber, percent } from './lib/format';
 // 탐사·차트 뷰는 탭을 열 때 불러온다
 const VoyageView = lazy(() => import('./views/VoyageView').then((m) => ({ default: m.VoyageView })));
 const ChartView = lazy(() => import('./views/ChartView').then((m) => ({ default: m.ChartView })));
+const SignalView = lazy(() => import('./views/SignalView').then((m) => ({ default: m.SignalView })));
 
-type View = 'explorer' | 'voyage' | 'charts' | 'ontology';
+type View = 'explorer' | 'voyage' | 'charts' | 'signal' | 'ontology';
 
 const TABS: { id: View; index: string; label: string }[] = [
   { id: 'explorer', index: '01', label: '그래프 탐색기' },
   { id: 'voyage', index: '02', label: '탐사' },
   { id: 'charts', index: '03', label: '차트' },
-  { id: 'ontology', index: '04', label: '온톨로지' },
+  { id: 'signal', index: '04', label: '시그널' },
+  { id: 'ontology', index: '05', label: '온톨로지' },
 ];
 
 function Logo() {
@@ -101,7 +103,7 @@ function SourceSwitch({
   account: AccountState;
 }) {
   const seg = (active: boolean) =>
-    `flex items-center gap-1.5 rounded-full px-2.5 py-[3px] text-[10.5px] transition ${active ? 'bg-white/[0.09] text-white' : 'text-white/40 hover:text-white/70'}`;
+    `flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-[3px] text-[10.5px] transition ${active ? 'bg-white/[0.09] text-white' : 'text-white/40 hover:text-white/70'}`;
 
   let dot = 'bg-white/30';
   let status = '';
@@ -156,7 +158,7 @@ function SourceSwitch({
           {source === 'demo' && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />}시연
         </button>
       </div>
-      <span className="font-mono text-[9px] tracking-[0.14em] text-white/40" title={title || undefined}>
+      <span className="hidden max-w-[220px] truncate font-mono text-[9px] tracking-[0.14em] text-white/40 min-[1700px]:inline" title={title || status}>
         {status}
       </span>
       {source === 'steam' && account.phase === 'unavailable' && account.reason === 'login' && <SignInThroughSteam />}
@@ -213,7 +215,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="relative z-20 flex h-[60px] shrink-0 items-center gap-8 border-b border-white/[0.06] bg-[#05060c]/95 px-5 backdrop-blur">
+      <header className="relative z-20 flex h-[60px] shrink-0 items-center gap-6 border-b border-white/[0.06] bg-[#05060c]/95 px-5 backdrop-blur">
         <div className="flex items-center gap-3">
           <Logo />
           <span className="text-[13px] font-semibold tracking-[0.22em] text-white">STEAMVERSE</span>
@@ -227,7 +229,7 @@ export default function App() {
               <button
                 key={t.id}
                 onClick={() => setView(t.id)}
-                className={`flex items-center gap-2 rounded-full px-4 py-[7px] text-[12.5px] transition ${
+                className={`flex items-center gap-2 whitespace-nowrap rounded-full px-3.5 py-[7px] text-[12.5px] transition ${
                   active
                     ? 'bg-white/[0.09] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
                     : 'text-white/45 hover:text-white/80'
@@ -240,12 +242,17 @@ export default function App() {
           })}
         </nav>
 
-        <div className="ml-auto flex items-center gap-7">
+        <div className="ml-auto flex items-center gap-6">
           <Kpi label="Library" value={formatNumber(stats.totalGames)} unit="개" />
           <Kpi label="Playtime" value={formatNumber(stats.totalHours)} unit="시간" />
           <Kpi label="Backlog" value={formatNumber(stats.byStatus.backlog)} unit="개" sub={percent(stats.byStatus.backlog, stats.totalGames)} />
-          <Kpi label="Last 2 weeks" value={formatNumber(stats.recentHours)} unit="시간" />
-          <Kpi label="Friends" value={formatNumber(stats.friends)} unit="명" />
+          {/* 좁은 화면에서는 덜 중요한 지표를 숨겨 헤더가 두 줄로 꺾이지 않게 */}
+          <div className="hidden min-[1600px]:block">
+            <Kpi label="Last 2 weeks" value={formatNumber(stats.recentHours)} unit="시간" />
+          </div>
+          <div className="hidden min-[1600px]:block">
+            <Kpi label="Friends" value={formatNumber(stats.friends)} unit="명" />
+          </div>
           <button
             onClick={() => setAboutOpen(true)}
             className="grid size-7 place-items-center rounded-full border border-white/[0.1] font-mono text-[11px] text-white/50 transition hover:border-white/30 hover:text-white"
@@ -259,7 +266,7 @@ export default function App() {
               <div className="grid size-8 place-items-center rounded-full bg-[#0a0c16] text-[12px] font-semibold text-white">나</div>
             </div>
             <div className="leading-tight">
-              <div className="text-[12.5px] font-medium text-white">{library.player.name}</div>
+              <div className="max-w-[120px] truncate whitespace-nowrap text-[12.5px] font-medium text-white">{library.player.name}</div>
               <div className="font-mono text-[10px] tracking-wider text-white/40">
                 LV {library.player.level}
                 {me && source === 'steam' && (
@@ -302,6 +309,17 @@ export default function App() {
         {view === 'charts' && (
           <Suspense fallback={<div className="h-full bg-[#04050a]" />}>
             <ChartView
+              graph={graph}
+              onOpenInExplorer={(id) => {
+                setSelectedId(id);
+                setView('explorer');
+              }}
+            />
+          </Suspense>
+        )}
+        {view === 'signal' && (
+          <Suspense fallback={<div className="h-full bg-[#04050a]" />}>
+            <SignalView
               graph={graph}
               onOpenInExplorer={(id) => {
                 setSelectedId(id);
