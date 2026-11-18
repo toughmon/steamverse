@@ -58,9 +58,9 @@ export interface TableSpec {
   rows: (string | number)[][];
 }
 
-function DataTable({ columns, rows }: TableSpec) {
+export function DataTable({ columns, rows, maxHeight }: TableSpec & { maxHeight?: string }) {
   return (
-    <div className="sv-scroll max-h-[420px] overflow-auto rounded-xl border border-white/[0.07]">
+    <div className="sv-scroll overflow-auto rounded-xl border border-white/[0.07]" style={{ maxHeight: maxHeight ?? '420px' }}>
       <table className="w-full text-[12px]">
         <thead className="sticky top-0 bg-[#0a0c15]">
           <tr>
