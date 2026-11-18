@@ -71,7 +71,43 @@ const LIGHT = (() => {
 })();
 
 /**
- * 행성 도트 그림. image가 없으면(로딩 중·실패) 섹터 색으로 띠무늬 행성을 만든다.
+ * 표지 없는 행성의 표면 밝기 (0.6~1.1). 무늬 4종: 0 위도 띠, 1 크레이터, 2 소용돌이, 3 대륙
+ * nx, ny, nz는 구 표면 좌표(-1..1)
+ */
+function surface(pattern: number, nx: number, ny: number, nz: number, seed: number, band: number): number {
+  const s = seed % 997;
+  switch (pattern) {
+    case 0: {
+      const stripe = Math.floor((ny + 1) * band + Math.sin(nx * 3 + s) * 0.6) % 2;
+      return stripe ? 1 : 0.68;
+    }
+    case 1: {
+      // 크레이터: 몇 개의 고정 중심에서 거리로 테두리(밝게)와 바닥(어둡게)
+      let k = 0.92;
+      for (let c = 0; c < 5; c++) {
+        const cx = Math.sin(s * 1.7 + c * 2.3) * 0.65;
+        const cy = Math.cos(s * 2.9 + c * 1.9) * 0.65;
+        const cr = 0.16 + ((s * (c + 3)) % 7) * 0.035;
+        const d = Math.hypot(nx - cx, ny - cy);
+        if (d < cr * 0.75) k = 0.66;
+        else if (d < cr) k = Math.max(k, 1.08);
+      }
+      return k;
+    }
+    case 2: {
+      const a = Math.atan2(ny, nx) + Math.hypot(nx, ny) * (3 + (s % 3));
+      return Math.sin(a * 3 + s) > 0.15 ? 1 : 0.7;
+    }
+    default: {
+      // 대륙: 사인파를 겹친 값으로 바다/땅을 나눈다
+      const v = Math.sin(nx * 3.1 + s) + Math.sin(ny * 2.7 - s * 0.7) + Math.sin((nx + ny + nz) * 4.3 + s * 1.3) * 0.6;
+      return v > 0.35 ? 1.05 : 0.64;
+    }
+  }
+}
+
+/**
+ * 행성 도트 그림. image가 없으면(기본값, 또는 로딩 중·실패) 섹터 색으로 무늬 행성을 만든다.
  * 반환 캔버스 크기 = 2r+2 (외곽 대기층 1px 포함)
  */
 export function planetSprite(r: number, tint: string, seed: number, image?: HTMLImageElement): HTMLCanvasElement {
@@ -100,6 +136,9 @@ export function planetSprite(r: number, tint: string, seed: number, image?: HTML
   const out = ctx.createImageData(size, size);
   const o = out.data;
   const band = (seed % 5) + 3;
+  const pattern = (seed >>> 3) % 4;
+  // 같은 섹터 안에서도 행성마다 색이 살짝 다르게
+  const shift = [0, 1, 2].map((c) => 0.86 + (((seed >>> (8 + c * 5)) & 31) / 31) * 0.28);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const nx = (x + 0.5 - size / 2) / r;
@@ -128,12 +167,11 @@ export function planetSprite(r: number, tint: string, seed: number, image?: HTML
         g0 = src[i + 1]!;
         b0 = src[i + 2]!;
       } else {
-        // 대체 무늬: 섹터 색 위도 띠
-        const stripe = Math.floor((ny + 1) * band + Math.sin(nx * 3 + seed) * 0.6) % 2;
-        const k = stripe ? 1 : 0.68;
-        r0 = tr * k;
-        g0 = tg * k;
-        b0 = tb * k;
+        // 표지 없는 행성 (기본값 — STEAM_COMPLIANCE C4): 섹터 색에 행성마다 다른 무늬
+        const k = surface(pattern, nx, ny, nz, seed, band);
+        r0 = Math.min(255, tr * k * shift[0]);
+        g0 = Math.min(255, tg * k * shift[1]);
+        b0 = Math.min(255, tb * k * shift[2]);
       }
       // 색 수 줄이기 (채널당 6단계) + 섹터 색을 살짝 섞어 무리마다 통일감
       const q = (v: number, t: number) => Math.round(((v * 0.82 + t * 0.18) * shade) / 51) * 51;

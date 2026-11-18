@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { area, curveMonotoneX, line } from 'd3-shape';
 import { scaleLinear } from 'd3-scale';
-import { steamImage, type OntNode, type OntologyGraph } from '@steamverse/shared';
+import { type OntNode, type OntologyGraph } from '@steamverse/shared';
 import { formatHours } from '../../lib/format';
+import { GameImage } from '../../components/GameImage';
 import { ChartCard, INK, SERIES, TipRow, Tooltip, useSize } from './kit';
 
 const H = 340;
@@ -165,7 +166,7 @@ export function LongTail({ graph, onOpen }: { graph: OntologyGraph; onOpen: (id:
         )}
         {hg && hover !== null && (
           <Tooltip x={M.l + x(hover)} y={M.t + y(hg.hours)} width={width}>
-            <img src={steamImage(hg.game!.appid, 'capsule')} alt="" className="mb-2 h-[44px] w-[117px] rounded-md object-cover" />
+            <GameImage appid={hg.game!.appid} kind="capsule" fallback="none" className="mb-2 h-[44px] w-[117px] rounded-md object-cover" />
             <div className="mb-1.5 text-[12.5px] font-medium text-white">{hg.label}</div>
             <TipRow label="순위" value={`${hover + 1}위`} />
             <TipRow label="플레이" value={formatHours(hg.hours)} />

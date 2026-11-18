@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { scaleLinear } from 'd3-scale';
-import { PLAY_STATUS, steamImage, type OntNode, type OntologyGraph } from '@steamverse/shared';
+import { PLAY_STATUS, type OntNode, type OntologyGraph } from '@steamverse/shared';
 import { samplePrice } from '../../data/samplePrices';
 import { formatHours } from '../../lib/format';
+import { GameImage } from '../../components/GameImage';
 import { ChartCard, INK, SERIES, TipRow, Tooltip, formatWon, useSize } from './kit';
 
 const H = 460;
@@ -112,7 +113,7 @@ export function Iceberg({ graph, onOpen }: { graph: OntologyGraph; onOpen: (id: 
               onClick={() => onOpen(d.pick!.node.id)}
               className="group overflow-hidden rounded-xl border border-white/[0.08] text-left transition hover:border-white/20"
             >
-              <img src={steamImage(d.pick.node.game!.appid, 'header')} alt="" className="aspect-[460/215] w-full object-cover opacity-90 group-hover:opacity-100" />
+              <GameImage appid={d.pick.node.game!.appid} label={d.pick.node.label} className="aspect-[460/215] w-full object-cover opacity-90 group-hover:opacity-100" />
               <div className="px-3.5 py-3">
                 <div className="eyebrow !text-[9px]">이번 주에 꺼내 볼 게임</div>
                 <div className="mt-1 text-[13.5px] font-medium text-white">{d.pick.node.label}</div>
@@ -202,7 +203,7 @@ export function Iceberg({ graph, onOpen }: { graph: OntologyGraph; onOpen: (id: 
             y={Math.max(60, Math.min(H - 60, WATER + (hs.above ? -1 : 1) * h(hs.price) * 0.7))}
             width={width}
           >
-            <img src={steamImage(hs.node.game!.appid, 'capsule')} alt="" className="mb-2 h-[44px] w-[117px] rounded-md object-cover" />
+            <GameImage appid={hs.node.game!.appid} kind="capsule" fallback="none" className="mb-2 h-[44px] w-[117px] rounded-md object-cover" />
             <div className="mb-1.5 text-[12.5px] font-medium text-white">{hs.node.label}</div>
             <TipRow
               label={d.anyReal && hs.node.game!.priceKrw === undefined ? '정가 (추정)' : '정가'}

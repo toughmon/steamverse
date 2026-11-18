@@ -27,6 +27,8 @@ export interface GameRecord {
   priceKrw?: number;
   /** 지금 할인 중일 때만 */
   sale?: { priceKrw: number; discountPercent: number };
+  /** 태그 출처. steamspy면 표본 추정치라 화면에 표시한다 (STEAM_COMPLIANCE P8) */
+  tagSource?: 'store' | 'steamspy';
 }
 
 export interface FriendRecord {

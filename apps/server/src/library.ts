@@ -1,9 +1,14 @@
 import type { FriendRecord, GameRecord, LibraryData } from '@steamverse/shared';
-import { cacheGet, cacheSet } from './lib/cache';
+import { cacheDelete, cacheGet, cachePurge, cacheSet } from './lib/cache';
+import { assertQuota } from './steam/quota';
 import { getAchievements, getFriends, getLevel, getOwnedGames, getPlayers, resolveVanity } from './steam/webapi';
 
 /** 플레이 기록은 자주 바뀌니 짧게 */
 const TTL = 10 * 60 * 1000;
+/** 친구 정보가 담긴 캐시 파일은 이만큼 지나면 디스크에서 지운다 (STEAM_COMPLIANCE P4) */
+export const LIBRARY_KEEP_MS = TTL * 2;
+/** 같은 계정의 강제 새로고침은 이 간격에 한 번만 (Web API 호출량 보호 — L1) */
+const REFRESH_COOLDOWN = 60 * 1000;
 /** 친구가 아주 많으면 앞에서부터 이만큼만 (각자 GetOwnedGames를 한 번씩 부르므로) */
 const MAX_FRIENDS = 60;
 /** 업적은 게임마다 한 번씩 불러야 해서, 플레이 시간 순 상위만 */
@@ -93,13 +98,28 @@ async function build(steamid: string): Promise<LibraryResponse> {
 
 const inflight = new Map<string, Promise<LibraryResponse>>();
 
+const lastRefresh = new Map<string, number>();
+
 export async function getLibrary(steamid: string, refresh = false): Promise<LibraryResponse> {
+  if (refresh) {
+    const last = lastRefresh.get(steamid) ?? 0;
+    if (Date.now() - last < REFRESH_COOLDOWN) refresh = false;
+    else lastRefresh.set(steamid, Date.now());
+  }
   if (!refresh) {
     const cached = await cacheGet<LibraryResponse>('library', steamid, TTL);
     if (cached) return cached;
   }
   let p = inflight.get(steamid);
   if (!p) {
+    // 한도에 가까우면 새로 받지 않는다. 지난 캐시가 남아 있으면 그거라도 준다
+    try {
+      await assertQuota();
+    } catch (err) {
+      const stale = await cacheGet<LibraryResponse>('library', steamid, LIBRARY_KEEP_MS);
+      if (stale) return stale;
+      throw err;
+    }
     p = build(steamid)
       .then(async (r) => {
         await cacheSet('library', steamid, r);
@@ -109,4 +129,15 @@ export async function getLibrary(steamid: string, refresh = false): Promise<Libr
     inflight.set(steamid, p);
   }
   return p;
+}
+
+/** 이 계정의 라이브러리(친구 정보 포함) 캐시를 즉시 지운다 */
+export async function deleteLibrary(steamid: string): Promise<void> {
+  lastRefresh.delete(steamid);
+  await cacheDelete('library', steamid);
+}
+
+/** 오래된 라이브러리 캐시 파일 정리 */
+export function purgeLibraries(): Promise<number> {
+  return cachePurge('library', LIBRARY_KEEP_MS);
 }
