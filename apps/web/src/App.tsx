@@ -12,15 +12,17 @@ import { formatNumber, percent } from './lib/format';
 const VoyageView = lazy(() => import('./views/VoyageView').then((m) => ({ default: m.VoyageView })));
 const ChartView = lazy(() => import('./views/ChartView').then((m) => ({ default: m.ChartView })));
 const SignalView = lazy(() => import('./views/SignalView').then((m) => ({ default: m.SignalView })));
+const ConstellationView = lazy(() => import('./views/ConstellationView').then((m) => ({ default: m.ConstellationView })));
 
-type View = 'explorer' | 'voyage' | 'charts' | 'signal' | 'ontology';
+type View = 'explorer' | 'voyage' | 'charts' | 'signal' | 'constellation' | 'ontology';
 
 const TABS: { id: View; index: string; label: string }[] = [
   { id: 'explorer', index: '01', label: '그래프 탐색기' },
   { id: 'voyage', index: '02', label: '탐사' },
   { id: 'charts', index: '03', label: '차트' },
   { id: 'signal', index: '04', label: '시그널' },
-  { id: 'ontology', index: '05', label: '온톨로지' },
+  { id: 'constellation', index: '05', label: '성단' },
+  { id: 'ontology', index: '06', label: '온톨로지' },
 ];
 
 function Logo() {
@@ -322,6 +324,17 @@ export default function App() {
             <SignalView
               graph={graph}
               onOpenInExplorer={(id) => {
+                setSelectedId(id);
+                setView('explorer');
+              }}
+            />
+          </Suspense>
+        )}
+        {view === 'constellation' && (
+          <Suspense fallback={<div className="h-full bg-[#04050a]" />}>
+            <ConstellationView
+              graph={graph}
+              onOpen={(id) => {
                 setSelectedId(id);
                 setView('explorer');
               }}
