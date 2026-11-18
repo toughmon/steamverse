@@ -5,7 +5,6 @@ import { SignInThroughSteam, useSession } from './components/Session';
 import { useSettings } from './lib/settings';
 import { readSavedSource, saveSource, useLibrary, type AccountState, type AccountWarning, type CatalogState, type Source } from './data/useLibrary';
 import { ExplorerView } from './views/ExplorerView';
-import { OntologyView } from './views/OntologyView';
 import { formatNumber, percent } from './lib/format';
 
 // 탐사·차트 뷰는 탭을 열 때 불러온다
@@ -16,7 +15,7 @@ const AchievementsView = lazy(() => import('./views/AchievementsView').then((m) 
 const Roulette = lazy(() => import('./components/Roulette').then((m) => ({ default: m.Roulette })));
 const ConstellationView = lazy(() => import('./views/ConstellationView').then((m) => ({ default: m.ConstellationView })));
 
-type View = 'explorer' | 'voyage' | 'charts' | 'signal' | 'constellation' | 'achievements' | 'ontology';
+type View = 'explorer' | 'voyage' | 'charts' | 'signal' | 'constellation' | 'achievements';
 
 const TABS: { id: View; index: string; label: string }[] = [
   { id: 'explorer', index: '01', label: '그래프 탐색기' },
@@ -25,7 +24,6 @@ const TABS: { id: View; index: string; label: string }[] = [
   { id: 'signal', index: '04', label: '시그널' },
   { id: 'constellation', index: '05', label: '성단' },
   { id: 'achievements', index: '06', label: '업적' },
-  { id: 'ontology', index: '07', label: '온톨로지' },
 ];
 
 function Logo() {
@@ -377,7 +375,6 @@ export default function App() {
             />
           </Suspense>
         )}
-        {view === 'ontology' && <OntologyView graph={graph} />}
         {view === 'voyage' && (
           <Suspense fallback={<div className="h-full bg-[#04050b]" />}>
             <VoyageView

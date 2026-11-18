@@ -1,10 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   CLASSES,
   PLAY_STATUS,
   RELATIONS,
   RELATION_READING,
-  nodeTurtle,
   otherEnd,
   steamStoreUrl,
   type OntNode,
@@ -141,8 +140,6 @@ function NeighborChip({ node, onSelect }: { node: OntNode; onSelect: (id: string
 
 export function NodeDetail({ graph, nodeId, onSelect, compact, actions }: Props) {
   const node = graph.nodeById.get(nodeId);
-  const [showRdf, setShowRdf] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const groups = useMemo<RelationGroup[]>(() => {
     if (!node) return [];
@@ -172,7 +169,6 @@ export function NodeDetail({ graph, nodeId, onSelect, compact, actions }: Props)
   const status = game ? PLAY_STATUS[game.status] : null;
   const limit = compact ? 6 : 24;
   const hours = splitHours(node.hours);
-  const ttl = showRdf ? nodeTurtle(graph, node.id) : '';
 
   return (
     <div className="fade-up flex flex-col gap-5" key={node.id}>
@@ -305,34 +301,6 @@ export function NodeDetail({ graph, nodeId, onSelect, compact, actions }: Props)
         </section>
       ))}
 
-      {!compact && (
-        <section className="overflow-hidden rounded-xl border border-white/[0.07]">
-          <button
-            onClick={() => setShowRdf((v) => !v)}
-            className="flex w-full items-center justify-between bg-white/[0.02] px-3.5 py-2.5 text-left transition hover:bg-white/[0.04]"
-          >
-            <span className="flex items-center gap-2">
-              <span className="eyebrow">RDF · Turtle</span>
-            </span>
-            <span className={`text-[11px] text-white/40 transition ${showRdf ? 'rotate-90' : ''}`}>›</span>
-          </button>
-          {showRdf && (
-            <div className="relative border-t border-white/[0.06] bg-black/30">
-              <button
-                onClick={async () => {
-                  await navigator.clipboard.writeText(ttl);
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 1400);
-                }}
-                className="absolute top-2 right-2 rounded-md border border-white/10 px-2 py-0.5 font-mono text-[10px] text-white/50 hover:text-white"
-              >
-                {copied ? 'copied' : 'copy'}
-              </button>
-              <pre className="sv-scroll max-h-80 overflow-auto p-3.5 font-mono text-[10.5px] leading-relaxed text-[#a8e6cf]/85">{ttl}</pre>
-            </div>
-          )}
-        </section>
-      )}
     </div>
   );
 }

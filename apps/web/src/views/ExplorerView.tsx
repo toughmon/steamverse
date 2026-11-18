@@ -686,7 +686,7 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
               <div className="eyebrow">Knowledge graph</div>
               <h2 className="mt-1.5 text-[20px] font-semibold tracking-tight text-white">지식 그래프 탐색기</h2>
               <p className="mt-2 text-[12.5px] leading-relaxed text-white/45">
-                게임·회사·시리즈·장르·태그·친구가 온톨로지 관계로 연결돼 있습니다. 노드를 고르면 관계와 RDF 표현을 볼 수 있습니다.
+                게임·회사·시리즈·장르·태그·친구가 온톨로지 관계로 연결돼 있습니다. 노드를 고르면 연결된 관계를 볼 수 있습니다.
               </p>
             </div>
 
