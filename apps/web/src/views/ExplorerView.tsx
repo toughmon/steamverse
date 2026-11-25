@@ -14,7 +14,6 @@ import {
   RELATION_ORDER,
   steamImage,
   type ClassId,
-  type OntEdge,
   type OntNode,
   type OntologyGraph,
   type PlayStatus,
@@ -25,13 +24,21 @@ import { GameImage } from '../components/GameImage';
 import { SearchBox } from '../components/SearchBox';
 import { Toggle } from '../components/Toggle';
 import { formatHours } from '../lib/format';
+import { ALL_STATUS, DEFAULT_CLASSES, computeVisible, type ViewEdge } from './explorer/visible';
+import { LargeCanvas } from './explorer/LargeCanvas';
+import type { Engine } from '../engine/client';
+import type { LargeView, ViewResult } from '../engine/protocol';
 import { LABEL_FONT, curvatureFor, drawDarkHover, edgeLook, drawHaloLabel, edgeStyle, nodeColor, nodeSize, premultiplied } from '../lib/sigmaStyle';
 
 interface Props {
   graph: OntologyGraph;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  /** 큰 그래프: 보기 계산·배치를 엔진(Worker)이 하고, 노드가 많으면 대용량 캔버스로 그린다 */
+  engine?: Engine | null;
 }
+
+const EMPTY_VISIBLE: { nodes: OntNode[]; edges: ViewEdge[] } = { nodes: [], edges: [] };
 
 type NodeAttrs = {
   x: number;
@@ -48,69 +55,12 @@ type NodeAttrs = {
 };
 type EdgeAttrs = { size: number; color: string; type: 'curved'; curvature: number; rel: RelationId | 'sharesGames' };
 
-/** 게임을 숨겼을 때, 같은 게임을 공유하는 두 노드를 직접 잇는 투영 엣지 */
-type SharedEdge = { id: string; source: string; target: string; rel: 'sharesGames'; weight: number };
-type ViewEdge = OntEdge | SharedEdge;
-
 const SHARED_COLOR = 'rgba(170,186,220,0.26)';
 
 function hexAlpha(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha.toFixed(3)})`;
 }
-/** 투영 엣지는 노드마다 가장 강한 몇 개만 남긴다 (태그처럼 많은 클래스에서 선이 폭발하지 않게) */
-const SHARED_TOP_K = 5;
-const SHARED_MIN = 2;
-
-function sharedEdges(graph: OntologyGraph, ids: Set<string>, statuses: Record<PlayStatus, boolean>): SharedEdge[] {
-  const pair = new Map<string, number>();
-  for (const game of graph.nodes) {
-    if (game.cls !== 'Game' || !statuses[game.game!.status]) continue;
-    const around = new Set<string>();
-    for (const e of graph.adjacency.get(game.id) ?? []) {
-      if (e.rel === 'owns' && e.source === graph.meId) continue;
-      const other = e.source === game.id ? e.target : e.source;
-      if (ids.has(other) && graph.nodeById.get(other)?.cls !== 'Game') around.add(other);
-    }
-    const list = [...around].sort();
-    for (let i = 0; i < list.length; i++)
-      for (let j = i + 1; j < list.length; j++) {
-        const key = `${list[i]}|${list[j]}`;
-        pair.set(key, (pair.get(key) ?? 0) + 1);
-      }
-  }
-  const all = [...pair].filter(([, w]) => w >= SHARED_MIN).sort((a, b) => b[1] - a[1]);
-  const used = new Map<string, number>();
-  const out: SharedEdge[] = [];
-  for (const [key, w] of all) {
-    const [a, b] = key.split('|') as [string, string];
-    // 둘 중 하나라도 아직 상위 K개를 못 채웠으면 남긴다 → 모든 노드가 최소한 연결된다
-    if ((used.get(a) ?? 0) >= SHARED_TOP_K && (used.get(b) ?? 0) >= SHARED_TOP_K) continue;
-    used.set(a, (used.get(a) ?? 0) + 1);
-    used.set(b, (used.get(b) ?? 0) + 1);
-    out.push({ id: `shared:${key}`, source: a, target: b, rel: 'sharesGames', weight: w });
-  }
-  // 기준(SHARED_MIN)에 못 미쳐 혼자 떠도는 노드는 가장 강한 연결 하나만이라도 남긴다
-  for (const [key, w] of [...pair].sort((x, y) => y[1] - x[1])) {
-    const [a, b] = key.split('|') as [string, string];
-    if (used.has(a) && used.has(b)) continue;
-    used.set(a, (used.get(a) ?? 0) + 1);
-    used.set(b, (used.get(b) ?? 0) + 1);
-    out.push({ id: `shared:${key}`, source: a, target: b, rel: 'sharesGames', weight: w });
-  }
-  return out;
-}
-
-const DEFAULT_CLASSES: Record<ClassId, boolean> = {
-  Game: true,
-  Organization: false,
-  Franchise: false,
-  Genre: true,
-  Tag: false,
-  Player: false,
-};
-const ALL_STATUS: Record<PlayStatus, boolean> = { backlog: true, tried: true, played: true, favorite: true };
-
 function mulberry32(seed: number) {
   let a = seed;
   return () => {
@@ -119,56 +69,6 @@ function mulberry32(seed: number) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-/** 보이는 노드·엣지 계산: 클래스·상태 필터 → (포커스 모드면) 선택 노드 중심 n단계 */
-function computeVisible(
-  graph: OntologyGraph,
-  classes: Record<ClassId, boolean>,
-  statuses: Record<PlayStatus, boolean>,
-  showInferred: boolean,
-  focus: { id: string; depth: number } | null,
-): { nodes: OntNode[]; edges: ViewEdge[] } {
-  let nodes = graph.nodes.filter((n) => classes[n.cls] && (n.cls !== 'Game' || statuses[n.game!.status]));
-  let ids = new Set(nodes.map((n) => n.id));
-  let edges: ViewEdge[] = graph.edges.filter(
-    (e) =>
-      ids.has(e.source) &&
-      ids.has(e.target) &&
-      (showInferred || !RELATIONS[e.rel].inferred) &&
-      // "내가 모든 게임을 보유" 관계는 그래프를 한 점으로 모아버리므로 탐색기에서는 생략
-      !(e.rel === 'owns' && e.source === graph.meId),
-  );
-  // 게임을 숨기면 회사·장르·태그는 서로 직접 이어지지 않는다 → 같은 게임을 공유하는 만큼 잇는다
-  if (!classes.Game) edges = [...edges, ...sharedEdges(graph, ids, statuses)];
-
-  if (focus && ids.has(focus.id)) {
-    const adj = new Map<string, string[]>();
-    for (const e of edges) {
-      adj.set(e.source, [...(adj.get(e.source) ?? []), e.target]);
-      adj.set(e.target, [...(adj.get(e.target) ?? []), e.source]);
-    }
-    const keep = new Set([focus.id]);
-    let frontier = [focus.id];
-    for (let d = 0; d < focus.depth; d++) {
-      const next: string[] = [];
-      for (const id of frontier) for (const nb of adj.get(id) ?? []) if (!keep.has(nb)) (keep.add(nb), next.push(nb));
-      frontier = next;
-    }
-    ids = keep;
-    nodes = nodes.filter((n) => keep.has(n.id));
-    edges = edges.filter((e) => keep.has(e.source) && keep.has(e.target));
-  }
-
-  // 연결이 하나도 없는 비(非)게임 노드는 숨긴다 (예: 게임이 모두 필터된 회사)
-  const degree = new Map<string, number>();
-  for (const e of edges) {
-    degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
-    degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
-  }
-  // 게임을 숨긴 투영 보기에서는 고립된 노드도 남긴다 (사용자가 직접 켠 클래스이므로)
-  nodes = nodes.filter((n) => n.cls === 'Game' || !classes.Game || n.id === focus?.id || (degree.get(n.id) ?? 0) > 0);
-  return { nodes, edges };
 }
 
 /** 할로(빛번짐)를 그릴 자리만큼 노드를 키운다. 안쪽 52%가 실제 점 */
@@ -183,7 +83,7 @@ function runLayout(g: Graph, iterations: number) {
   forceAtlas2.assign(g, { iterations, settings: layoutSettings(g) });
 }
 
-export function ExplorerView({ graph, selectedId, onSelect }: Props) {
+export function ExplorerView({ graph, selectedId, onSelect, engine = null }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const fa2Ref = useRef<FA2Layout | null>(null);
@@ -205,11 +105,37 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
   const [depth, setDepth] = useState(2);
 
   const focus = focusMode && selectedId ? { id: selectedId, depth } : null;
-  const visible = useMemo(
-    () => computeVisible(graph, classes, statuses, showInferred, focus),
+  const localVisible = useMemo(
+    () => (engine ? EMPTY_VISIBLE : computeVisible(graph, classes, statuses, showInferred, focus)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [graph, classes, statuses, showInferred, focus?.id, focus?.depth],
+    [engine, graph, classes, statuses, showInferred, focus?.id, focus?.depth],
   );
+  // 엔진이 있으면 보기 계산을 Worker에 맡긴다. 새 결과가 올 때까지 지금 화면을 그대로 둔다
+  const [remote, setRemote] = useState<ViewResult | null>(null);
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (!engine) return;
+    let alive = true;
+    setPending(true);
+    void engine.api.view({ classes, statuses, showInferred, focus }).then((r) => {
+      if (!alive) return;
+      setRemote(r);
+      setPending(false);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, classes, statuses, showInferred, focus?.id, focus?.depth]);
+  const large: LargeView | null = engine && remote?.kind === 'large' ? remote : null;
+  const visible = useMemo(() => {
+    if (!engine) return localVisible;
+    if (remote?.kind !== 'small') return EMPTY_VISIBLE;
+    return { nodes: remote.nodeIds.map((id) => graph.nodeById.get(id)!).filter(Boolean), edges: remote.edges };
+  }, [engine, remote, localVisible, graph]);
+  const largeSigmaRef = useRef<Sigma | null>(null);
+  /** 확대·축소 버튼이 움직일 sigma: 지금 보이는 쪽 */
+  const activeSigma = () => (large ? largeSigmaRef.current : sigmaRef.current);
 
   const classCounts = useMemo(() => {
     const c = Object.fromEntries(CLASS_ORDER.map((k) => [k, 0])) as Record<ClassId, number>;
@@ -217,7 +143,7 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
     return c;
   }, [graph]);
 
-  const visibleRelations = useMemo(() => new Set(visible.edges.map((e) => e.rel)), [visible]);
+  const visibleRelations = useMemo(() => new Set<string>(large ? large.relations : visible.edges.map((e) => e.rel)), [visible, large]);
 
   // ── 이웃 집합 갱신 ────────────────────────────────────────────
   /** 그래프 전체 크기. 선이 '긴지' 판단하는 기준 */
@@ -504,7 +430,7 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
   }
   const relayout = () => settle(2500, 6);
 
-  const resetCamera = () => sigmaRef.current?.getCamera().animatedReset({ duration: 500 });
+  const resetCamera = () => activeSigma()?.getCamera().animatedReset({ duration: 500 });
 
   const topGames = useMemo(
     () => graph.nodes.filter((n) => n.cls === 'Game').sort((a, b) => b.hours - a.hours).slice(0, 6),
@@ -512,7 +438,8 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
   );
   const favoriteDevs = useMemo(
     () =>
-      graph.edges
+      // 전체 엣지를 훑지 않고 '나'에 닿은 엣지만 본다 (큰 그래프에서 엣지 목록을 통째로 만들지 않게)
+      (graph.adjacency.get(graph.meId) ?? [])
         .filter((e) => e.rel === 'favoriteDeveloper')
         .map((e) => graph.nodeById.get(e.target)!)
         .filter(Boolean),
@@ -611,40 +538,52 @@ export function ExplorerView({ graph, selectedId, onSelect }: Props) {
       <div className="relative min-w-0 flex-1 overflow-hidden">
         <div className="dot-grid pointer-events-none absolute inset-0 opacity-60" />
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_45%,rgba(122,162,255,0.07),transparent_60%)]" />
-        <div ref={containerRef} className="absolute inset-0" />
+        <div ref={containerRef} className={`absolute inset-0 ${large ? 'invisible' : ''}`} />
+        {large && engine && (
+          <LargeCanvas graph={graph} payload={engine.payload} view={large} selectedId={selectedId} onSelect={onSelect} sigmaRef={largeSigmaRef} />
+        )}
+        {engine && (pending || !remote) && (
+          <div className="pointer-events-none absolute top-4 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/10 bg-black/50 px-3 py-1 font-mono text-[10px] tracking-[0.14em] text-white/60">
+            GRAPH ENGINE · 계산 중…
+          </div>
+        )}
         <div className="vignette pointer-events-none absolute inset-0" />
 
         <div className="glass absolute top-4 right-4 flex flex-col overflow-hidden rounded-xl">
-          <CanvasButton title="확대" onClick={() => sigmaRef.current?.getCamera().animatedZoom({ duration: 250 })}>
+          <CanvasButton title="확대" onClick={() => activeSigma()?.getCamera().animatedZoom({ duration: 250 })}>
             <path d="M10 5v10M5 10h10" strokeLinecap="round" />
           </CanvasButton>
-          <CanvasButton title="축소" onClick={() => sigmaRef.current?.getCamera().animatedUnzoom({ duration: 250 })}>
+          <CanvasButton title="축소" onClick={() => activeSigma()?.getCamera().animatedUnzoom({ duration: 250 })}>
             <path d="M5 10h10" strokeLinecap="round" />
           </CanvasButton>
           <CanvasButton title="전체 보기" onClick={resetCamera}>
             <path d="M4 7V4h3M16 7V4h-3M4 13v3h3M16 13v3h-3" strokeLinecap="round" strokeLinejoin="round" />
           </CanvasButton>
-          <CanvasButton title="다시 배치" onClick={relayout}>
-            <circle cx="6" cy="6" r="1.8" />
-            <circle cx="14" cy="8" r="1.8" />
-            <circle cx="8" cy="14.5" r="1.8" />
-            <path d="M7.6 6.5l4.6 1.1M7.2 12.8l-.6-5M9.6 13.4l3.4-4" strokeLinecap="round" />
-          </CanvasButton>
+          {/* 대용량 배치는 엔진이 정해 두므로 다시 배치는 보통 그래프에서만 */}
+          {!large && (
+            <CanvasButton title="다시 배치" onClick={relayout}>
+              <circle cx="6" cy="6" r="1.8" />
+              <circle cx="14" cy="8" r="1.8" />
+              <circle cx="8" cy="14.5" r="1.8" />
+              <path d="M7.6 6.5l4.6 1.1M7.2 12.8l-.6-5M9.6 13.4l3.4-4" strokeLinecap="round" />
+            </CanvasButton>
+          )}
         </div>
 
         <div className="pointer-events-none absolute bottom-4 left-5 flex items-center gap-4 font-mono text-[10px] tracking-wider text-white/35">
           <span>
-            <span className="text-white/70">{visible.nodes.length}</span> NODES
+            <span className="text-white/70">{large ? large.nodeIdx.length : visible.nodes.length}</span> NODES
           </span>
           <span className="h-3 w-px bg-white/10" />
           <span>
-            <span className="text-white/70">{visible.edges.length}</span> EDGES
+            <span className="text-white/70">{large ? large.edgeCount : visible.edges.length}</span> EDGES
+            {large && <span className="ml-1.5 text-white/25">({large.edgeA.length} drawn · hubs on hover)</span>}
           </span>
           <span className="h-3 w-px bg-white/10" />
-          <span>SIZE = PLAYTIME · RING = STATUS · HOVER = TRACE LINKS</span>
+          <span>{large ? 'WEBGL · WORKER LAYOUT · HOVER = TRACE LINKS' : 'SIZE = PLAYTIME · RING = STATUS · HOVER = TRACE LINKS'}</span>
         </div>
         <div className="pointer-events-none absolute right-5 bottom-4 font-mono text-[10px] tracking-wider text-white/25">
-          DRAG · SCROLL · DRAG NODE TO PIN
+          {large ? 'DRAG · SCROLL' : 'DRAG · SCROLL · DRAG NODE TO PIN'}
         </div>
       </div>
 

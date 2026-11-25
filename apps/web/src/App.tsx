@@ -5,6 +5,9 @@ import { SignInThroughSteam, useSession } from './components/Session';
 import { useSettings } from './lib/settings';
 import { readSavedSource, saveSource, useLibrary, type AccountState, type AccountWarning, type CatalogState, type Source } from './data/useLibrary';
 import { ExplorerView } from './views/ExplorerView';
+import { readStressCount } from './data/stressLibrary';
+import { useGraphEngine, type EngineState } from './engine/client';
+import { ENGINE_LIBRARY, type EngineSource } from './engine/protocol';
 import { formatNumber, percent } from './lib/format';
 
 // 탐사·차트 뷰는 탭을 열 때 불러온다
@@ -14,6 +17,10 @@ const SignalView = lazy(() => import('./views/SignalView').then((m) => ({ defaul
 const AchievementsView = lazy(() => import('./views/AchievementsView').then((m) => ({ default: m.AchievementsView })));
 const Roulette = lazy(() => import('./components/Roulette').then((m) => ({ default: m.Roulette })));
 const ConstellationView = lazy(() => import('./views/ConstellationView').then((m) => ({ default: m.ConstellationView })));
+
+/** 주소에 ?stress=N 이 있으면 가상 라이브러리 N개로 탐색기만 띄우는 부하 테스트 모드 */
+const STRESS = readStressCount();
+const STRESS_SOURCE: EngineSource | null = STRESS ? { kind: 'stress', count: STRESS } : null;
 
 type View = 'explorer' | 'voyage' | 'charts' | 'signal' | 'constellation' | 'achievements';
 
@@ -177,13 +184,40 @@ function SourceSwitch({
   );
 }
 
+/** 부하 테스트 모드 표시: 데이터 출처 전환 대신 보인다 */
+function StressBadge({ count, state }: { count: number; state: EngineState }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="whitespace-nowrap rounded-full border border-amber-200/30 bg-amber-300/10 px-2.5 py-[3px] font-mono text-[10px] tracking-[0.14em] text-amber-100/90">
+        STRESS · {count.toLocaleString('ko-KR')}
+      </span>
+      <span className="hidden whitespace-nowrap font-mono text-[9px] tracking-[0.14em] text-white/40 min-[1800px]:inline">
+        {state.phase === 'ready'
+          ? `가상 데이터 · 그래프 ${(state.buildMs / 1000).toFixed(1)}초 · 전체 ${(state.totalMs / 1000).toFixed(1)}초`
+          : state.phase === 'error'
+            ? '오류'
+            : '그래프 엔진 준비 중…'}
+      </span>
+      <a href={window.location.pathname} className="whitespace-nowrap text-[10.5px] text-white/40 underline-offset-2 hover:text-white hover:underline">
+        끝내기
+      </a>
+    </div>
+  );
+}
+
 export default function App() {
   const [source, setSourceState] = useState<Source>(readSavedSource);
   const setSource = (s: Source) => {
     setSourceState(s);
     saveSource(s);
   };
-  const { library, catalog, account } = useLibrary(source);
+  // 부하 테스트 중에는 서버에 아무것도 묻지 않는 시연 데이터를 바탕에 깔아 둔다
+  const { library, catalog, account } = useLibrary(STRESS ? 'demo' : source);
+  // 큰 그래프(부하 테스트 또는 게임이 아주 많은 라이브러리)는 그래프 엔진(Worker)이 만들고 소유한다
+  const bigLibrary = !STRESS && library.games.length > ENGINE_LIBRARY;
+  const librarySource = useMemo<EngineSource | null>(() => (bigLibrary ? { kind: 'library', library } : null), [bigLibrary, library]);
+  const engineState = useGraphEngine(STRESS_SOURCE ?? librarySource);
+  const engineMode = !!STRESS || bigLibrary;
   const [settings, updateSettings] = useSettings();
   const [aboutOpen, setAboutOpen] = useState(false);
   const [rouletteOpen, setRouletteOpen] = useState(false);
@@ -206,12 +240,17 @@ export default function App() {
   }, [demo]);
 
   // 이미지 정책은 렌더 전에 정한다. 바뀌면 아래 main을 다시 그려 모든 화면이 새 정책을 따르게 한다
-  const imagesOn = settings.images && !demo;
+  // 부하 테스트의 게임은 가상 appid라 받을 이미지가 없다. Steam CDN에 수만 건을 요청하지도 않는다
+  const imagesOn = settings.images && !demo && !STRESS;
   setImagePolicy({ enabled: imagesOn, blocked });
   const imageKey = `${imagesOn}:${blocked.join(',')}`;
 
-  const graph = useMemo(() => buildOntologyGraph(library), [library]);
-  const [view, setView] = useState<View>('explorer');
+  const libraryGraph = useMemo(() => buildOntologyGraph(engineMode ? { ...library, games: [], friends: [] } : library), [engineMode, library]);
+  const graph = engineState.phase === 'ready' ? engineState.graph : libraryGraph;
+  const player = engineState.phase === 'ready' ? engineState.player : library.player;
+  const [rawView, setView] = useState<View>('explorer');
+  // 부하 테스트는 탐색기만: 다른 탭은 수만 개를 그리도록 만들어져 있지 않다
+  const view = STRESS ? 'explorer' : rawView;
   const [rawSelectedId, setSelectedId] = useState<string | null>(null);
   // 데이터가 갱신되며 선택한 노드가 사라졌을 수 있다
   const selectedId = rawSelectedId && graph.nodeById.has(rawSelectedId) ? rawSelectedId : null;
@@ -223,20 +262,25 @@ export default function App() {
         <div className="flex items-center gap-3">
           <Logo />
           <span className="text-[13px] font-semibold tracking-[0.22em] text-white">STEAMVERSE</span>
-          <SourceSwitch source={source} onChange={setSource} catalog={catalog} account={account} />
+          {STRESS ? <StressBadge count={STRESS} state={engineState} /> : <SourceSwitch source={source} onChange={setSource} catalog={catalog} account={account} />}
         </div>
 
         <nav className="flex items-center rounded-full border border-white/[0.07] bg-white/[0.025] p-1">
           {TABS.map((t) => {
             const active = view === t.id;
+            const off = !!STRESS && t.id !== 'explorer';
             return (
               <button
                 key={t.id}
                 onClick={() => setView(t.id)}
+                disabled={off}
+                title={off ? '부하 테스트 중에는 탐색기만 열 수 있습니다' : undefined}
                 className={`flex items-center gap-2 whitespace-nowrap rounded-full px-3.5 py-[7px] text-[12.5px] transition ${
                   active
                     ? 'bg-white/[0.09] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
-                    : 'text-white/45 hover:text-white/80'
+                    : off
+                      ? 'cursor-not-allowed text-white/20'
+                      : 'text-white/45 hover:text-white/80'
                 }`}
               >
                 <span className={`font-mono text-[9.5px] ${active ? 'text-sky-200/80' : 'text-white/25'}`}>{t.index}</span>
@@ -278,10 +322,10 @@ export default function App() {
               <div className="grid size-8 place-items-center rounded-full bg-[#0a0c16] text-[12px] font-semibold text-white">나</div>
             </div>
             <div className="leading-tight">
-              <div className="max-w-[120px] truncate whitespace-nowrap text-[12.5px] font-medium text-white">{library.player.name}</div>
+              <div className="max-w-[120px] truncate whitespace-nowrap text-[12.5px] font-medium text-white">{player.name}</div>
               <div className="font-mono text-[10px] tracking-wider text-white/40">
-                LV {library.player.level}
-                {me && source === 'steam' && (
+                LV {player.level}
+                {me && source === 'steam' && !STRESS && (
                   <button onClick={logout} className="ml-2 text-white/35 underline-offset-2 hover:text-white hover:underline">
                     로그아웃
                   </button>
@@ -330,7 +374,25 @@ export default function App() {
             DEMO
           </div>
         )}
-        {view === 'explorer' && <ExplorerView graph={graph} selectedId={selectedId} onSelect={setSelectedId} />}
+        {engineMode && engineState.phase !== 'ready' ? (
+          <div className="grid h-full place-items-center bg-[#04050a] text-center">
+            {engineState.phase === 'error' ? (
+              <p className="text-[13px] text-amber-200/80">그래프를 만들지 못했습니다: {engineState.message}</p>
+            ) : (
+              <div className="flex flex-col items-center gap-3">
+                <div className="size-8 animate-spin rounded-full border-2 border-white/10 border-t-sky-300/80" />
+                <p className="text-[13px] text-white/60">
+                  {STRESS ? `가상 게임 ${STRESS.toLocaleString('ko-KR')}개로` : `게임 ${library.games.length.toLocaleString('ko-KR')}개로`} 그래프를 만드는 중…
+                </p>
+                <p className="font-mono text-[10px] tracking-[0.14em] text-white/30">화면 밖(Worker)에서 계산합니다</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          view === 'explorer' && (
+            <ExplorerView graph={graph} selectedId={selectedId} onSelect={setSelectedId} engine={engineState.phase === 'ready' ? engineState.engine : null} />
+          )
+        )}
         {view === 'charts' && (
           <Suspense fallback={<div className="h-full bg-[#04050a]" />}>
             <ChartView
