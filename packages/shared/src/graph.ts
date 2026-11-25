@@ -188,6 +188,108 @@ function cosine(a: Vector, b: Vector): number {
   return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }
 
+type Pair = { a: string; b: string; score: number };
+
+/** 이보다 게임이 많으면 모든 쌍을 비교하지 않고 태그 역색인으로 후보만 비교한다 (쌍의 수가 n²으로 늘어서) */
+const LARGE_LIBRARY = 2500;
+/** 큰 라이브러리에서 게임 하나가 비교해 보는 후보 수 */
+const CANDIDATE_BUDGET = 320;
+/** 큰 라이브러리에서 게임마다 군집·유사도용으로 남기는 가장 닮은 이웃 수 */
+const LARGE_KEEP = 8;
+
+/** 모든 쌍을 비교한다. 결과가 정확하며 수천 개까지는 충분히 빠르다 */
+function exactPairs(gameIds: string[], vectors: Map<string, Vector>): Pair[] {
+  const out: Pair[] = [];
+  for (let i = 0; i < gameIds.length; i++) {
+    for (let j = i + 1; j < gameIds.length; j++) {
+      const a = gameIds[i]!;
+      const b = gameIds[j]!;
+      const score = cosine(vectors.get(a)!, vectors.get(b)!);
+      if (score >= CLUSTER_EDGE_THRESHOLD) out.push({ a, b, score });
+    }
+  }
+  return out;
+}
+
+/**
+ * 근사 비교: 태그를 공유하는 게임만 후보로 삼는다. 흔한 태그일수록 덜 변별적이므로 드문 태그의 후보부터 채우고,
+ * 후보가 너무 많은 태그는 고르게 표본을 뽑는다. 게임마다 가장 닮은 몇 개만 남긴다.
+ * 게임 5만 개 기준 n² 12억 쌍 → 약 1,600만 쌍 비교.
+ */
+function approxPairs(gameIds: string[], vectors: Map<string, Vector>): Pair[] {
+  const n = gameIds.length;
+  // 특징 → 정수, 게임 → 정렬된 (특징, 가중치) 배열
+  const featureId = new Map<string, number>();
+  const feats: Int32Array[] = [];
+  const weights: Float64Array[] = [];
+  const norms = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = [...vectors.get(gameIds[i]!)!].map(([k, w]) => {
+      let id = featureId.get(k);
+      if (id === undefined) featureId.set(k, (id = featureId.size));
+      return [id, w] as const;
+    });
+    v.sort((x, y) => x[0] - y[0]);
+    feats.push(Int32Array.from(v, (x) => x[0]));
+    weights.push(Float64Array.from(v, (x) => x[1]));
+    norms[i] = Math.sqrt(v.reduce((s, x) => s + x[1] * x[1], 0));
+  }
+  // 역색인: 태그(태그가 없는 게임은 장르)로만 만든다. 장르는 너무 넓어 후보를 거르지 못한다
+  const isTag = new Uint8Array(featureId.size);
+  for (const [k, id] of featureId) if (k.startsWith('t:')) isTag[id] = 1;
+  const postings: number[][] = Array.from({ length: featureId.size }, () => []);
+  const keys: Int32Array[] = feats.map((f) => {
+    const tagOnly = f.filter((id) => isTag[id]);
+    return tagOnly.length ? tagOnly : f;
+  });
+  keys.forEach((k, i) => k.forEach((id) => postings[id]!.push(i)));
+
+  const sim = (i: number, j: number) => {
+    const fa = feats[i]!, fb = feats[j]!, wa = weights[i]!, wb = weights[j]!;
+    let x = 0, y = 0, dot = 0;
+    while (x < fa.length && y < fb.length) {
+      if (fa[x] === fb[y]) dot += wa[x++]! * wb[y++]!;
+      else if (fa[x]! < fb[y]!) x++;
+      else y++;
+    }
+    return norms[i] && norms[j] ? dot / (norms[i]! * norms[j]!) : 0;
+  };
+
+  const stamp = new Int32Array(n).fill(-1);
+  const seen = new Set<number>();
+  const out: Pair[] = [];
+  const top: { j: number; s: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const order = [...keys[i]!].sort((p, q) => postings[p]!.length - postings[q]!.length);
+    let budget = CANDIDATE_BUDGET;
+    top.length = 0;
+    for (let k = 0; k < order.length && budget > 0; k++) {
+      const list = postings[order[k]!]!;
+      // 남은 태그끼리 예산을 나눈다
+      const share = Math.max(8, Math.floor(budget / (order.length - k)));
+      const step = list.length > share ? list.length / share : 1;
+      // 게임마다 다른 곳에서 시작해 같은 몇 개만 계속 뽑히지 않게
+      let pos = step > 1 ? (i * 2654435761) % Math.floor(step) : 0;
+      for (let c = 0; c < share && pos < list.length; c++, pos += step) {
+        const j = list[Math.floor(pos)]!;
+        if (j === i || stamp[j] === i) continue;
+        stamp[j] = i;
+        budget--;
+        const s = sim(i, j);
+        if (s >= CLUSTER_EDGE_THRESHOLD) top.push({ j, s });
+      }
+    }
+    top.sort((p, q) => q.s - p.s);
+    for (const { j, s } of top.slice(0, LARGE_KEEP)) {
+      const key = i < j ? i * n + j : j * n + i;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ a: gameIds[i]!, b: gameIds[j]!, score: s });
+    }
+  }
+  return out;
+}
+
 /** 결정적 결과를 위한 시드 난수 (Louvain용) */
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -348,20 +450,17 @@ export function buildOntologyGraph(lib: LibraryData): OntologyGraph {
 
   // 추론: similarTo
   const gameIds = [...vectors.keys()];
-  const pairScores: { a: string; b: string; score: number }[] = [];
-  for (let i = 0; i < gameIds.length; i++) {
-    for (let j = i + 1; j < gameIds.length; j++) {
-      const a = gameIds[i]!;
-      const b = gameIds[j]!;
-      const score = cosine(vectors.get(a)!, vectors.get(b)!);
-      if (score >= CLUSTER_EDGE_THRESHOLD) pairScores.push({ a, b, score });
-    }
-  }
+  const pairScores = gameIds.length > LARGE_LIBRARY ? approxPairs(gameIds, vectors) : exactPairs(gameIds, vectors);
   const topByGame = new Map<string, { other: string; score: number }[]>();
+  const pushTop = (id: string, item: { other: string; score: number }) => {
+    const list = topByGame.get(id);
+    if (list) list.push(item);
+    else topByGame.set(id, [item]);
+  };
   for (const { a, b, score } of pairScores) {
     if (score < SIMILAR_THRESHOLD) continue;
-    topByGame.set(a, [...(topByGame.get(a) ?? []), { other: b, score }]);
-    topByGame.set(b, [...(topByGame.get(b) ?? []), { other: a, score }]);
+    pushTop(a, { other: b, score });
+    pushTop(b, { other: a, score });
   }
   for (const [gameId, list] of topByGame) {
     list.sort((x, y) => y.score - x.score);
@@ -384,13 +483,19 @@ export function buildOntologyGraph(lib: LibraryData): OntologyGraph {
   const communities = louvain(simGraph, { getEdgeWeight: 'weight', rng: mulberry32(42) });
 
   const members = new Map<number, string[]>();
-  for (const [id, c] of Object.entries(communities)) members.set(c, [...(members.get(c) ?? []), id]);
+  for (const [id, c] of Object.entries(communities)) {
+    const list = members.get(c);
+    if (list) list.push(id);
+    else members.set(c, [id]);
+  }
 
   const OTHER = -1;
   const groups = new Map<number, string[]>();
   for (const [c, ids] of members) {
     const key = ids.length >= 3 ? c : OTHER; // 너무 작은 군집은 "기타"로 묶는다
-    groups.set(key, [...(groups.get(key) ?? []), ...ids]);
+    const list = groups.get(key);
+    if (list) for (const id of ids) list.push(id);
+    else groups.set(key, [...ids]);
   }
 
   const clusters: TasteCluster[] = [...groups.entries()]
@@ -419,9 +524,14 @@ export function buildOntologyGraph(lib: LibraryData): OntologyGraph {
 
   // 인접 리스트
   const adjacency = new Map<string, OntEdge[]>();
+  const link = (id: string, e: OntEdge) => {
+    const list = adjacency.get(id);
+    if (list) list.push(e);
+    else adjacency.set(id, [e]);
+  };
   for (const e of edges) {
-    adjacency.set(e.source, [...(adjacency.get(e.source) ?? []), e]);
-    adjacency.set(e.target, [...(adjacency.get(e.target) ?? []), e]);
+    link(e.source, e);
+    link(e.target, e);
   }
 
   // 통계
