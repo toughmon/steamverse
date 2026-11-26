@@ -26,6 +26,7 @@ import { Toggle } from '../components/Toggle';
 import { formatHours } from '../lib/format';
 import { ALL_STATUS, DEFAULT_CLASSES, computeVisible, type ViewEdge } from './explorer/visible';
 import { LargeCanvas } from './explorer/LargeCanvas';
+import { CrowdDrag } from '../lib/crowdDrag';
 import type { Engine } from '../engine/client';
 import type { LargeView, ViewResult } from '../engine/protocol';
 import { LABEL_FONT, curvatureFor, drawDarkHover, edgeLook, drawHaloLabel, edgeStyle, nodeColor, nodeSize, premultiplied } from '../lib/sigmaStyle';
@@ -87,6 +88,7 @@ export function ExplorerView({ graph, selectedId, onSelect, engine = null }: Pro
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const fa2Ref = useRef<FA2Layout | null>(null);
+  const crowdRef = useRef<CrowdDrag | null>(null);
   const positions = useRef(new Map<string, { x: number; y: number }>());
   const lastProjected = useRef(false);
   const interaction = useRef<{ hovered: string | null; selected: string | null; neighbors: Set<string> }>({
@@ -241,14 +243,24 @@ export function ExplorerView({ graph, selectedId, onSelect, engine = null }: Pro
       },
     });
     sigmaRef.current = sigma;
+    // 개발 중 측정·테스트용 (배포 빌드에서는 빠진다)
+    if (import.meta.env.DEV) Object.assign(window, { __sigmaSmall: sigma });
 
+    // 끄는 중에는 다른 노드 위를 지나가도 강조를 끌고 있는 노드에 둔다.
+    // 그동안에도 커서 아래 노드는 따로 기억해 두었다가 손을 놓을 때 맞춘다 (안 그러면 끈 노드에 강조가 남는다)
+    let dragged: string | null = null;
+    let underCursor: string | null = null;
     sigma.on('enterNode', ({ node }) => {
+      underCursor = node;
+      if (dragged) return;
       interaction.current.hovered = node;
       updateNeighbors();
       container.style.cursor = 'pointer';
       sigma.refresh({ skipIndexation: true });
     });
     sigma.on('leaveNode', () => {
+      underCursor = null;
+      if (dragged) return;
       interaction.current.hovered = null;
       updateNeighbors();
       container.style.cursor = '';
@@ -257,29 +269,66 @@ export function ExplorerView({ graph, selectedId, onSelect, engine = null }: Pro
     sigma.on('clickNode', ({ node }) => onSelectRef.current(node));
     sigma.on('clickStage', () => onSelectRef.current(null));
 
-    // 노드 드래그
-    let dragged: string | null = null;
+    // 노드 드래그: 다른 노드 위를 지나가지 못하고 앞을 막는 노드를 밀어낸다 (물리는 lib/crowdDrag)
+    const crowd = new CrowdDrag({
+      unitsPerPx: () => {
+        const a = sigma.viewportToGraph({ x: 0, y: 0 });
+        const b = sigma.viewportToGraph({ x: 100, y: 0 });
+        return Math.hypot(b.x - a.x, b.y - a.y) / 100;
+      },
+      // 빛나는 점은 바깥 할로를 뺀 안쪽 원만 몸통으로 친다
+      forEachNode: (cb) =>
+        sigma.getGraph().forEachNode((k, a) => cb(k, a.x, a.y, sigma.scaleSize(a.type === 'glow' ? a.size * 0.6 : a.size))),
+      write: (moved) => {
+        const g = sigma.getGraph();
+        const nodes: string[] = [];
+        const edges = new Set<string>();
+        for (const { key, x, y } of moved) {
+          if (!g.hasNode(key)) continue;
+          const a = g.getNodeAttributes(key);
+          a.x = x;
+          a.y = y;
+          positions.current.set(key, { x, y });
+          nodes.push(key);
+          g.forEachEdge(key, (e) => void edges.add(e));
+        }
+        // 좌표를 직접 고치고 움직인 노드·선만 다시 그린다
+        sigma.refresh({ partialGraph: { nodes, edges: [...edges] }, skipIndexation: true, schedule: true });
+      },
+      settle: () => updateExtent(sigma.getGraph()),
+    });
     sigma.on('downNode', ({ node }) => {
       dragged = node;
+      // 배치 다듬기가 돌고 있으면 멈춘다 (물리와 서로 좌표를 덮어쓰지 않게)
+      fa2Ref.current?.kill();
+      fa2Ref.current = null;
       if (!sigma.getCustomBBox()) sigma.setCustomBBox(sigma.getBBox());
+      crowd.start(node);
     });
     const captor = sigma.getMouseCaptor();
     captor.on('mousemovebody', (e) => {
       if (!dragged) return;
       const pos = sigma.viewportToGraph(e);
-      const g = sigma.getGraph();
-      g.setNodeAttribute(dragged, 'x', pos.x);
-      g.setNodeAttribute(dragged, 'y', pos.y);
-      positions.current.set(dragged, pos);
+      crowd.move(pos.x, pos.y);
       e.preventSigmaDefault();
       e.original.preventDefault();
       e.original.stopPropagation();
     });
     captor.on('mouseup', () => {
+      if (!dragged) return;
       dragged = null;
+      crowd.end();
+      if (interaction.current.hovered !== underCursor) {
+        interaction.current.hovered = underCursor;
+        updateNeighbors();
+        container.style.cursor = underCursor ? 'pointer' : '';
+        sigma.refresh({ skipIndexation: true });
+      }
     });
+    crowdRef.current = crowd;
 
     return () => {
+      crowd.cancel();
       fa2Ref.current?.kill();
       sigma.kill();
       sigmaRef.current = null;
@@ -293,6 +342,7 @@ export function ExplorerView({ graph, selectedId, onSelect, engine = null }: Pro
     if (!sigma) return;
     fa2Ref.current?.kill();
     fa2Ref.current = null;
+    crowdRef.current?.cancel();
 
     const g = new Graph<NodeAttrs, EdgeAttrs>({ type: 'directed', multi: false });
     const rand = mulberry32(7);
@@ -540,7 +590,15 @@ export function ExplorerView({ graph, selectedId, onSelect, engine = null }: Pro
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_45%,rgba(122,162,255,0.07),transparent_60%)]" />
         <div ref={containerRef} className={`absolute inset-0 ${large ? 'invisible' : ''}`} />
         {large && engine && (
-          <LargeCanvas graph={graph} payload={engine.payload} view={large} selectedId={selectedId} onSelect={onSelect} sigmaRef={largeSigmaRef} />
+          <LargeCanvas
+            graph={graph}
+            payload={engine.payload}
+            view={large}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            sigmaRef={largeSigmaRef}
+            onPins={(list) => void engine.api.pins(list)}
+          />
         )}
         {engine && (pending || !remote) && (
           <div className="pointer-events-none absolute top-4 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/10 bg-black/50 px-3 py-1 font-mono text-[10px] tracking-[0.14em] text-white/60">
@@ -583,7 +641,7 @@ export function ExplorerView({ graph, selectedId, onSelect, engine = null }: Pro
           <span>{large ? 'WEBGL · WORKER LAYOUT · HOVER = TRACE LINKS' : 'SIZE = PLAYTIME · RING = STATUS · HOVER = TRACE LINKS'}</span>
         </div>
         <div className="pointer-events-none absolute right-5 bottom-4 font-mono text-[10px] tracking-wider text-white/25">
-          {large ? 'DRAG · SCROLL' : 'DRAG · SCROLL · DRAG NODE TO PIN'}
+          DRAG · SCROLL · DRAG NODE TO PIN
         </div>
       </div>
 

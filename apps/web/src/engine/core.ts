@@ -186,6 +186,16 @@ export class GraphEngine {
     return { result, transfer: [result.nodeIdx, result.x, result.y, result.size, result.colorIdx, result.edgeA, result.edgeB, result.edgeRel].map((a) => a.buffer as ArrayBuffer) };
   }
 
+  pins(list: { key: string; x: number; y: number }[]) {
+    for (const { key, x, y } of list) {
+      const i = this.index.get(key);
+      if (i === undefined) continue;
+      this.px[i] = x;
+      this.py[i] = y;
+      this.placed[i] = 1;
+    }
+  }
+
   /**
    * 아직 자리가 없는 노드를 배치한다. 한 번 정한 자리는 기억해서 필터를 바꿔도 그림이 흔들리지 않는다.
    * 1) 게임: 취향 군집마다 원판을 해바라기 씨 배열로 놓고 그 안에 흩뿌린다

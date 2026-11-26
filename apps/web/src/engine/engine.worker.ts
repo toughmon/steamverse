@@ -18,6 +18,9 @@ const api: EngineApi = {
     const { result, transfer } = engine.view(query);
     return Comlink.transfer(result, transfer);
   },
+  async pins(list: { key: string; x: number; y: number }[]) {
+    engine.pins(list);
+  },
 };
 
 Comlink.expose(api);
