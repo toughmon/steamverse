@@ -75,4 +75,6 @@ export type ViewResult = SmallView | LargeView;
 export interface EngineApi {
   init(source: EngineSource): Promise<GraphPayload>;
   view(query: ViewQuery): Promise<ViewResult>;
+  /** 사용자가 끌어 옮긴(또는 함께 끌려온) 노드의 자리를 기억한다 (필터를 바꿔도 그 자리에) */
+  pins(list: { key: string; x: number; y: number }[]): Promise<void>;
 }
